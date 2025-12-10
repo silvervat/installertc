@@ -4,7 +4,7 @@ import {
   User, Save, Trash2, Box, Truck, BarChart3, Hammer, MousePointer2, History, AlertCircle, 
   ChevronRight, ChevronDown, Plus, X, ChevronsUpDown, CalendarDays, Settings, Wrench, AlertTriangle,
   Clock, TrendingUp, CheckCircle, PieChart, Construction, AlertOctagon, RefreshCcw,
-  TowerControl, Forklift, BicepsFlexed, HelpCircle, Pencil, Calendar, XCircle, Info, ArrowLeft, CheckSquare
+  TowerControl, Forklift, Hand, HelpCircle, Pencil, Calendar, XCircle, Info, ArrowLeft, CheckSquare
 } from 'lucide-react';
 import { DEFAULT_INSTALLER, DEFAULT_VEHICLE } from '../constants';
 
@@ -17,7 +17,7 @@ const INSTALL_METHODS = ['Kraana', 'Upitaja', 'Käsitsi', 'MUU'];
 const METHOD_ICONS: Record<string, React.ReactNode> = {
   'Kraana': <TowerControl size={16} />,
   'Upitaja': <Forklift size={16} />,
-  'Käsitsi': <BicepsFlexed size={16} />,
+  'Käsitsi': <Hand size={16} />,
   'MUU': <HelpCircle size={16} />
 };
 
