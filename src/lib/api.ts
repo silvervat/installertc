@@ -94,9 +94,7 @@ export class AssemblyAPI {
 
     const { error } = await supabase
       .from('assembly_parts')
-      .upsert(partsToUpsert, {
-        onConflict: 'guid'
-      });
+      .upsert(partsToUpsert);
 
     if (error) {
       console.error('Error syncing parts:', error);
