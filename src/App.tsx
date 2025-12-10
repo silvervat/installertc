@@ -150,12 +150,18 @@ function App() {
     }
 
     console.log(`🔍 Loading ${selection.length} selected objects...`);
+    console.log('📍 Selection IDs:', selection);
 
     try {
       // Get properties for selected objects - kasutab Trimble Connect API-t
       const viewer = api.viewer;
       const objectsData = await viewer.getObjects({ selected: true });
-      
+
+      // DEBUG: Log raw API response
+      console.group('🔬 DEBUG: Trimble API Raw Response');
+      console.log('viewer.getObjects({ selected: true }):', JSON.stringify(objectsData, null, 2));
+      console.groupEnd();
+
       if (!objectsData || objectsData.length === 0) {
         console.warn('No object data found');
         return;
@@ -163,13 +169,24 @@ function App() {
 
       // Extract properties from each model
       const properties: Array<{ objectId: string; properties: Record<string, any> }> = [];
-      
+
       for (const modelData of objectsData) {
         const modelId = modelData.modelId;
         const objects = modelData.objects || [];
-        
+
+        console.group(`🏗️ DEBUG: Model ${modelId}`);
+        console.log('Model data:', JSON.stringify(modelData, null, 2));
+        console.log('Objects count:', objects.length);
+
         for (const obj of objects) {
           const props = await viewer.getObjectProperties([obj.objectRuntimeId]);
+
+          // DEBUG: Log each object's properties
+          console.group(`📦 Object: ${obj.objectId}`);
+          console.log('Object data:', JSON.stringify(obj, null, 2));
+          console.log('Object properties:', JSON.stringify(props, null, 2));
+          console.groupEnd();
+
           if (props && props.length > 0) {
             properties.push({
               objectId: obj.objectId,
@@ -177,9 +194,11 @@ function App() {
             });
           }
         }
+        console.groupEnd();
       }
-      
+
       console.log('📋 Properties loaded:', properties.length);
+      console.log('📋 All properties:', JSON.stringify(properties, null, 2));
       
       // Sync to Supabase with project name and model name
       await AssemblyAPI.syncParts(
