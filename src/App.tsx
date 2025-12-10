@@ -11,9 +11,126 @@ import type {
 } from '../types';
 
 // ============================================
-// 🔬 DIAGNOSTIC SYSTEM v2.4 - DataTable API
+// 🔬 DIAGNOSTIC SYSTEM v2.5 - Full Extraction
 // ============================================
-const APP_VERSION = 'v2.4';
+const APP_VERSION = 'v2.5';
+
+// ============================================
+// 📦 HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Get selected objects from the viewer
+ * Returns array of { modelId, objects[] }
+ */
+const getSelectedObjects = async (api: WorkspaceAPI.WorkspaceAPI): Promise<Array<{
+  modelId: string;
+  objects: any[];
+}>> => {
+  try {
+    const viewer = api.viewer;
+    const objectsData = await viewer.getObjects({ selected: true });
+
+    if (!objectsData || !Array.isArray(objectsData)) {
+      return [];
+    }
+
+    return objectsData
+      .filter((m: any) => m?.modelId && Array.isArray(m?.objects) && m.objects.length > 0)
+      .map((m: any) => ({
+        modelId: String(m.modelId),
+        objects: m.objects
+      }));
+  } catch (err) {
+    console.error('❌ getSelectedObjects failed:', err);
+    return [];
+  }
+};
+
+/**
+ * Flatten object properties into a simple key-value structure
+ * Extracts GUID and all Tekla/IFC properties
+ */
+const flattenProps = async (
+  obj: any,
+  modelId: string,
+  api: WorkspaceAPI.WorkspaceAPI
+): Promise<{
+  objectId: string;
+  guid: string;
+  properties: Record<string, any>;
+}> => {
+  const result: Record<string, any> = {};
+  const runtimeId = obj?.id || obj?.objectRuntimeId;
+  const objectId = String(runtimeId);
+
+  // Extract GUID from various sources
+  let guid = '';
+
+  // Try to get from object directly
+  if (obj?.guid) guid = obj.guid;
+  if (obj?.GUID) guid = obj.GUID;
+  if (obj?.GlobalId) guid = obj.GlobalId;
+
+  // Process properties if they exist
+  const props = obj?.properties || [];
+
+  if (Array.isArray(props)) {
+    // Properties come as array of property sets
+    for (const propSet of props) {
+      const setName = propSet?.name || propSet?.propertySetName || '';
+      const properties = propSet?.properties || [];
+
+      if (Array.isArray(properties)) {
+        for (const prop of properties) {
+          const propName = prop?.name || prop?.propertyName || '';
+          const propValue = prop?.value ?? prop?.propertyValue ?? '';
+
+          if (propName) {
+            // Create key with property set prefix if available
+            const key = setName ? `${setName}.${propName}` : propName;
+            result[key] = propValue;
+
+            // Also store without prefix for easier access
+            if (!result[propName]) {
+              result[propName] = propValue;
+            }
+
+            // Check for GUID fields
+            if (propName === 'GUID' || propName === 'GlobalId' || propName === 'IFC GUID') {
+              if (!guid && propValue) guid = String(propValue);
+              if (propName === 'GUID' || propName === 'GlobalId') result.GUID_IFC = propValue;
+            }
+            if (propName === 'GUID_MS' || propName === 'MS_GUID') {
+              result.GUID_MS = propValue;
+            }
+          }
+        }
+      }
+    }
+  } else if (typeof props === 'object') {
+    // Properties come as object
+    Object.entries(props).forEach(([key, value]) => {
+      result[key] = value;
+
+      if ((key === 'GUID' || key === 'GlobalId') && value) {
+        if (!guid) guid = String(value);
+        result.GUID_IFC = value;
+      }
+    });
+  }
+
+  // Fallback GUID from result or generate from runtime ID
+  if (!guid) {
+    guid = result.GUID || result.GlobalId || result['IFC GUID'] || `runtime-${modelId}-${objectId}`;
+  }
+
+  return {
+    objectId,
+    guid,
+    properties: result
+  };
+};
 
 const runDiagnostics = async (api: WorkspaceAPI.WorkspaceAPI) => {
   console.log('%c╔══════════════════════════════════════════════════════════════╗', 'color: #3b82f6; font-weight: bold;');
@@ -345,147 +462,232 @@ function App() {
     return () => clearInterval(interval);
   }, [api, loading]);
 
-  // Handle selection changes from viewer - using DataTable API
-  const handleSelectionChange = useCallback(async (selection: string[]) => {
+  // Handle selection changes from viewer - FULL EXTRACTION v2.5
+  const handleSelectionChange = useCallback(async (selection: any[]) => {
     if (!api || !projectId || !projectName) {
       console.log('⏭️ Skipping selection change - not ready');
       return;
     }
 
-    if (selection.length === 0) {
+    if (!selection || selection.length === 0) {
       console.log('🔄 Selection cleared');
       setParts([]);
       return;
     }
 
-    console.log(`🔍 Loading ${selection.length} selected objects...`);
-    console.log('📍 Selection IDs:', selection);
+    console.log('\n═══════════════════════════════════════════════════════════');
+    console.log('🎯 FULL EXTRACTION - Metadata + Tekla + Properties');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log(`Selected: ${selection.length} objects`);
 
     try {
-      // Extract properties using DataTable API
-      const properties: Array<{ objectId: string; properties: Record<string, any> }> = [];
-      const dataTableApi = (api as any).dataTable;
+      const viewer = api.viewer;
 
-      console.group('📊 DataTable API Approach');
+      // ═══════════════════════════════════════════════════════════
+      // STEP 1: Get Project and Models info
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n📁 STEP 1: Loading project and model metadata...');
 
-      // Method 1: DataTable API (PREFERRED)
-      if (dataTableApi && typeof dataTableApi.getSelectedRowsData === 'function') {
-        console.log('✅ DataTable API available, trying getSelectedRowsData...');
+      // Get project info
+      const project = await api.project.getProject();
+      const projectNameFull = project?.name || projectName || 'Unknown Project';
+      console.log(`   Project: ${projectNameFull} (${projectId})`);
 
-        try {
-          const selectedRowsData = await dataTableApi.getSelectedRowsData();
-          console.log('DataTable selectedRowsData:', JSON.stringify(selectedRowsData, null, 2));
+      // Get all models
+      const allModels = await viewer.getModels();
+      const modelNameMap = new Map<string, string>();
 
-          if (selectedRowsData && Array.isArray(selectedRowsData) && selectedRowsData.length > 0) {
-            console.log(`✅ Got ${selectedRowsData.length} rows from DataTable API`);
-
-            for (const row of selectedRowsData) {
-              // DataTable returns all properties directly
-              const guid = row.GUID || row.guid || row.GlobalId || row.globalId || row.id;
-              const objectId = guid || String(row.id || row._id || Math.random());
-
-              console.log(`📦 Processing row with GUID: ${objectId}`);
-              console.log('Row data:', JSON.stringify(row, null, 2));
-
-              properties.push({
-                objectId: objectId,
-                properties: {
-                  GUID: guid,
-                  Mark: row.Mark || row.mark || row.MARK || '',
-                  Name: row.Name || row.name || row.NAME || '',
-                  Weight: row.Weight || row.weight || row.WEIGHT || row.NetWeight || 0,
-                  Assembly: row.Assembly || row.assembly || row.ASSEMBLY || '',
-                  Phase: row.Phase || row.phase || row.PHASE || '',
-                  Material: row.Material || row.material || '',
-                  Profile: row.Profile || row.profile || '',
-                  Length: row.Length || row.length || 0,
-                  // Include all other properties
-                  ...row
-                }
-              });
-            }
-          } else {
-            console.warn('⚠️ DataTable returned empty or invalid data');
-          }
-        } catch (dtErr) {
-          console.warn('⚠️ DataTable API error:', dtErr);
+      allModels?.forEach((m: any) => {
+        if (m?.id && m?.name) {
+          modelNameMap.set(String(m.id), String(m.name));
+          console.log(`   Model: ${m.name} (${m.id})`);
         }
-      } else {
-        console.log('⚠️ DataTable API not available');
-      }
+      });
 
-      // Method 2: Fallback to viewer API if DataTable didn't work
-      if (properties.length === 0) {
-        console.log('📦 Falling back to viewer.getObjects...');
+      // ═══════════════════════════════════════════════════════════
+      // STEP 2: Get selected objects
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n📦 STEP 2: Getting selected objects...');
+      const selectedWithBasic = await getSelectedObjects(api);
 
-        const viewer = api.viewer;
-        const objectsData = await viewer.getObjects({ selected: true });
-        console.log('viewer.getObjects result:', JSON.stringify(objectsData, null, 2));
-
-        if (objectsData && objectsData.length > 0) {
-          for (const modelData of objectsData) {
-            const currentModelId = modelData.modelId;
-            const objects = modelData.objects || [];
-
-            for (const obj of objects) {
-              const runtimeId = obj.id || obj.objectRuntimeId;
-              const objectId = obj.objectId || String(runtimeId);
-
-              // Try getObjectProperties as last resort
-              let objProps: Record<string, any> = {};
-              try {
-                const props = await viewer.getObjectProperties([runtimeId]);
-                if (props && props.length > 0) {
-                  objProps = props[0] || {};
-                }
-              } catch (e) {
-                console.warn('getObjectProperties failed:', e);
-              }
-
-              properties.push({
-                objectId: objectId,
-                properties: {
-                  _runtimeId: runtimeId,
-                  _modelId: currentModelId,
-                  ...objProps
-                }
-              });
-            }
-          }
-        }
-      }
-
-      console.groupEnd();
-
-      console.log('📋 Properties loaded:', properties.length);
-      console.log('📋 All properties:', JSON.stringify(properties, null, 2));
-
-      if (properties.length === 0) {
-        console.warn('⚠️ No properties could be loaded');
+      if (!selectedWithBasic.length) {
+        console.warn('⚠️ No objects selected');
+        setParts([]);
         return;
       }
 
-      // Sync to Supabase with project name and model name
+      console.log(`✅ Found ${selectedWithBasic.length} model(s) with selected objects`);
+
+      // ═══════════════════════════════════════════════════════════
+      // STEP 3: Load full properties for each object
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n📋 STEP 3: Loading full properties with metadata...');
+
+      const propertiesCollection: Array<{
+        objectId: string;
+        guid: string;
+        properties: Record<string, any>;
+      }> = [];
+
+      for (const { modelId: currentModelId, objects } of selectedWithBasic) {
+        const currentModelName = modelNameMap.get(currentModelId) || modelName || 'Unknown Model';
+
+        console.log(`\n   📦 Model: ${currentModelName} (${currentModelId})`);
+        console.log(`   Objects count: ${objects.length}`);
+
+        // Extract runtime IDs
+        const objectRuntimeIds = objects
+          .map((o: any) => Number(o?.id))
+          .filter((n: number) => Number.isFinite(n));
+
+        // Load FULL properties (including hidden)
+        let fullObjects = objects;
+
+        try {
+          console.log(`   ⏳ Loading properties with getObjectProperties...`);
+
+          const fullProperties = await viewer.getObjectProperties(
+            currentModelId,
+            objectRuntimeIds,
+            { includeHidden: true }
+          );
+
+          console.log(`   ✅ Got ${fullProperties?.length || 0} property sets`);
+
+          // Merge properties into objects
+          fullObjects = objects.map((obj: any, idx: number) => ({
+            ...obj,
+            properties: fullProperties?.[idx]?.properties || obj.properties,
+          }));
+
+        } catch (e: any) {
+          console.error(`   ❌ getObjectProperties failed:`, e.message);
+
+          // Try alternative method
+          try {
+            console.log(`   ⏳ Trying alternative: getObjectProperties with array...`);
+            for (let i = 0; i < objects.length; i++) {
+              const obj = objects[i];
+              const runtimeId = obj?.id || obj?.objectRuntimeId;
+              try {
+                const props = await viewer.getObjectProperties([runtimeId]);
+                if (props && props.length > 0) {
+                  fullObjects[i] = { ...obj, properties: props[0]?.properties || props };
+                }
+              } catch (innerErr) {
+                // Continue with next object
+              }
+            }
+          } catch (altErr) {
+            console.warn(`   ⚠️ Alternative method also failed`);
+          }
+        }
+
+        // Flatten each object's properties + ADD METADATA
+        console.log(`   🔄 Flattening ${fullObjects.length} objects...`);
+
+        for (const obj of fullObjects) {
+          try {
+            const flattened = await flattenProps(obj, currentModelId, api);
+
+            // ═══════════════════════════════════════════════════════════
+            // ADD METADATA FIELDS
+            // ═══════════════════════════════════════════════════════════
+            flattened.properties.FileName = currentModelName;
+            flattened.properties.ModelId = currentModelId;
+            flattened.properties.Project = projectNameFull;
+
+            // Type from object
+            flattened.properties.Type = obj?.type
+              || flattened.properties.Type
+              || flattened.properties['Tekla_Assembly.Cast_unit_type']
+              || 'Unknown';
+
+            // Name from object
+            flattened.properties.Name = obj?.name
+              || flattened.properties.Name
+              || flattened.properties['Tekla_Assembly.Cast_unit_Mark']
+              || '';
+
+            console.log(`   ✅ Object ${flattened.objectId}:`);
+            console.log(`      GUID: ${flattened.guid}`);
+            console.log(`      FileName: ${flattened.properties.FileName}`);
+            console.log(`      Type: ${flattened.properties.Type}`);
+            console.log(`      Mark: ${flattened.properties['Tekla_Assembly.Cast_unit_Mark'] || flattened.properties.Mark || 'N/A'}`);
+
+            propertiesCollection.push(flattened);
+
+          } catch (err: any) {
+            console.error(`   ❌ Failed to flatten object ${obj?.id}:`, err.message);
+          }
+        }
+      }
+
+      console.log(`\n✅ Total properties collected: ${propertiesCollection.length}`);
+
+      // ═══════════════════════════════════════════════════════════
+      // STEP 4: Verify all required fields
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n🔍 STEP 4: Verifying required fields...');
+
+      propertiesCollection.forEach((item, idx) => {
+        const props = item.properties;
+
+        console.log(`\n   Object ${idx + 1}/${propertiesCollection.length}:`);
+        console.log(`      ✓ GUID: ${item.guid || '❌ MISSING'}`);
+        console.log(`      ✓ FileName: ${props.FileName || '❌ MISSING'}`);
+        console.log(`      ✓ ModelId: ${props.ModelId || '❌ MISSING'}`);
+        console.log(`      ✓ Project: ${props.Project || '❌ MISSING'}`);
+        console.log(`      ✓ Type: ${props.Type || '(empty)'}`);
+        console.log(`      ✓ Name: ${props.Name || '(empty)'}`);
+
+        // Check Tekla fields
+        const teklaFields = [
+          'Tekla_Assembly.Cast_unit_Mark',
+          'Tekla_Assembly.Assembly',
+          'Tekla_Assembly.Cast_unit_weight',
+          'Tekla_Assembly.Cast_unit_position_code'
+        ];
+
+        const foundTekla = teklaFields.filter(f => props[f]);
+        if (foundTekla.length > 0) {
+          console.log(`      🏗️ Tekla fields: ${foundTekla.length}/${teklaFields.length} found`);
+        }
+      });
+
+      // ═══════════════════════════════════════════════════════════
+      // STEP 5: Sync to Supabase
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n💾 STEP 5: Syncing to Supabase...');
+
+      if (propertiesCollection.length === 0) {
+        throw new Error('No properties could be loaded');
+      }
+
       await AssemblyAPI.syncParts(
         projectId,
         projectName,
         modelId || 'default-model',
         modelName || 'Unknown Model',
-        properties
+        propertiesCollection
       );
 
-      // Load from Supabase with all related data
-      const loadedParts = await AssemblyAPI.getParts(
-        projectId,
-        modelId || 'default-model',
-        properties.map(p => p.objectId)
-      );
+      console.log('✅ Synced to Supabase');
 
-      console.log('✅ Loaded parts from database:', loadedParts.length);
+      // ═══════════════════════════════════════════════════════════
+      // STEP 6: Load from Supabase
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n📥 STEP 6: Loading from Supabase...');
 
-      // Map to local format
+      const guids = propertiesCollection.map(p => p.guid);
+      const loadedParts = await AssemblyAPI.getPartsByGuids(projectId, guids);
+
+      console.log(`✅ Loaded ${loadedParts.length} parts from database`);
+
+      // Map to UI format
       setParts(loadedParts.map(p => ({
         id: p.object_id,
+        guid: p.guid,
         mark: p.mark || 'N/A',
         assembly: p.assembly || '',
         name: p.name || '',
@@ -513,9 +715,12 @@ function App() {
           user: log.user_name
         }))
       })));
-    } catch (err) {
-      console.error('❌ Error loading parts:', err);
-      alert('Viga andmete laadimisel: ' + (err as Error).message);
+
+      console.log('═══════════════════════════════════════════════════════════\n');
+
+    } catch (err: any) {
+      console.error('❌ Error:', err);
+      alert('Viga andmete laadimisel: ' + err.message);
     }
   }, [api, projectId, projectName, modelId, modelName]);
 

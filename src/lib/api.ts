@@ -4,7 +4,7 @@ export class AssemblyAPI {
   /**
    * Sync parts from Trimble Connect to Supabase
    * Creates or updates parts based on object properties
-   * Salvestab ka projekti ja mudeli nimed!
+   * Includes GUID, Tekla data, metadata (FileName, Type, Project)
    */
   static async syncParts(
     projectId: string,
@@ -13,33 +13,89 @@ export class AssemblyAPI {
     modelName: string,
     parts: Array<{
       objectId: string;
+      guid: string;
       properties: Record<string, any>;
     }>
   ): Promise<void> {
     if (!parts || parts.length === 0) return;
 
-    const partsToUpsert = parts.map(p => ({
-      project_id: projectId,
-      project_name: projectName,  // Salvestame projekti nime!
-      model_id: modelId,
-      model_name: modelName,      // Salvestame mudeli nime!
-      object_id: p.objectId,
-      mark: p.properties['Mark'] || p.properties['Name'] || p.properties['Product Name'],
-      assembly: p.properties['Assembly Code'] || p.properties['Assembly'],
-      name: p.properties['Name'] || p.properties['Product Name'] || p.properties['Description'],
-      weight: this.parseNumber(p.properties['Weight']),
-      phase: p.properties['Phase'] || p.properties['Assembly Phase'],
-      profile: p.properties['Profile'] || p.properties['Section'],
-      material: p.properties['Material'] || p.properties['Grade'],
-      length: this.parseNumber(p.properties['Length']),
-      guid: p.properties['GUID'] || p.properties['IFC GUID'] || p.properties['GlobalId'],
-      updated_at: new Date().toISOString()
-    }));
+    const partsToUpsert = parts.map(p => {
+      const props = p.properties;
+
+      // Extract all Tekla Assembly fields into a JSONB object
+      const teklaData: Record<string, any> = {
+        position_code: props['Tekla_Assembly.Cast_unit_position_code'] || null,
+        rebar_weight: this.parseNumber(props['Tekla_Assembly.Cast_unit_rebar_weight']),
+        bottom_elevation: this.parseNumber(props['Tekla_Assembly.Cast_unit_bottom_elevation']),
+        top_elevation: this.parseNumber(props['Tekla_Assembly.Cast_unit_top_elevation']),
+        cast_unit_type: props['Tekla_Assembly.Cast_unit_type'] || null
+      };
+
+      // Only include tekla_data if at least one field has value
+      const hasTeklaData = Object.values(teklaData).some(v => v !== null);
+
+      return {
+        // PRIMARY KEY - use GUID for uniqueness
+        guid: p.guid,
+        project_id: projectId,
+
+        // METADATA (from model/project)
+        project_name: props.Project || projectName,
+        model_id: props.ModelId || modelId,
+        model_name: props.FileName || modelName,
+        file_name: props.FileName || modelName,
+        object_id: p.objectId,
+
+        // BASIC PROPERTIES - check Tekla fields first
+        mark: props['Tekla_Assembly.Cast_unit_Mark']
+          || props.Mark
+          || props.Name
+          || 'N/A',
+
+        name: props.Name
+          || props['Tekla_Assembly.Cast_unit_Mark']
+          || null,
+
+        type: props.Type
+          || props['Tekla_Assembly.Cast_unit_type']
+          || 'Unknown',
+
+        assembly: props['Tekla_Assembly.Assembly']
+          || props.Assembly
+          || props['Assembly Code']
+          || null,
+
+        weight: this.parseNumber(
+          props['Tekla_Assembly.Cast_unit_weight']
+          || props.Weight
+        ),
+
+        phase: props.Phase || props['Assembly Phase'] || null,
+        profile: props.Profile || props.Section || null,
+        material: props.Material || props.Grade || null,
+        length: this.parseNumber(props.Length),
+
+        // TEKLA-SPECIFIC DATA (only if present)
+        tekla_data: hasTeklaData ? teklaData : null,
+
+        updated_at: new Date().toISOString()
+      };
+    });
+
+    console.log('📊 Sample part to sync:', {
+      guid: partsToUpsert[0]?.guid,
+      project: partsToUpsert[0]?.project_name,
+      fileName: partsToUpsert[0]?.file_name,
+      modelId: partsToUpsert[0]?.model_id,
+      mark: partsToUpsert[0]?.mark,
+      type: partsToUpsert[0]?.type,
+      teklaData: partsToUpsert[0]?.tekla_data
+    });
 
     const { error } = await supabase
       .from('assembly_parts')
       .upsert(partsToUpsert, {
-        onConflict: 'project_id,model_id,object_id',
+        onConflict: 'guid,project_id',
         ignoreDuplicates: false
       });
 
@@ -48,7 +104,37 @@ export class AssemblyAPI {
       throw new Error(`Failed to sync parts: ${error.message}`);
     }
 
-    console.log(`✅ Synced ${parts.length} parts to database (Project: ${projectName}, Model: ${modelName})`);
+    console.log(`✅ Synced ${parts.length} parts with full metadata (Project: ${projectName}, Model: ${modelName})`);
+  }
+
+  /**
+   * Get parts by GUIDs (for loading after sync)
+   */
+  static async getPartsByGuids(
+    projectId: string,
+    guids: string[]
+  ): Promise<DbPartWithRelations[]> {
+    if (!guids || guids.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from('assembly_parts')
+      .select(`
+        *,
+        installation:installations(*),
+        delivery:deliveries(*),
+        bolting:boltings(*),
+        logs:part_logs(*)
+      `)
+      .eq('project_id', projectId)
+      .in('guid', guids)
+      .order('mark', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching parts by GUIDs:', error);
+      throw new Error(`Failed to fetch parts: ${error.message}`);
+    }
+
+    return (data || []) as DbPartWithRelations[];
   }
 
   /**
