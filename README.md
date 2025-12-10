@@ -1,6 +1,6 @@
 # 🏗️ Assembly Installer - Trimble Connect Extension
 
-Paigalduse, tarne ja polditud staatuse jälgimise rakendus Trimble Connect Web keskkonnas.
+Paigalduse, tarne ja polditud staatuse jälgimise rakendus Trimble Connect Web keskkonnas....
 
 **✨ Täiesti automaatne - ei vaja API võtmeid!** Kõik projekti ja mudeli info tuleb Trimble Connect Workspace API-st.
 
