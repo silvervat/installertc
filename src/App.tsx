@@ -99,6 +99,42 @@ function App() {
     init();
   }, []);
 
+  // Polling for selection changes (backup mechanism)
+  const lastSelectionRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (!api || loading) return;
+
+    const pollSelection = async () => {
+      try {
+        const selection = await api.viewer.getSelection();
+        const currentIds = selection || [];
+
+        // Check if selection changed
+        const lastIds = lastSelectionRef.current;
+        const changed = currentIds.length !== lastIds.length ||
+          currentIds.some((id, i) => id !== lastIds[i]);
+
+        if (changed) {
+          console.log('🔄 Polling detected selection change:', currentIds.length, 'objects');
+          lastSelectionRef.current = currentIds;
+          if (handleSelectionChangeRef.current) {
+            handleSelectionChangeRef.current(currentIds);
+          }
+        }
+      } catch (err) {
+        // Ignore polling errors
+      }
+    };
+
+    // Poll every 1 second
+    const interval = setInterval(pollSelection, 1000);
+
+    // Initial check
+    pollSelection();
+
+    return () => clearInterval(interval);
+  }, [api, loading]);
 
   // Handle selection changes from viewer
   const handleSelectionChange = useCallback(async (selection: string[]) => {
