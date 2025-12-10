@@ -329,11 +329,41 @@ function App() {
     try {
       // Get properties for selected objects - kasutab Trimble Connect API-t
       const viewer = api.viewer;
-      const objectsData = await viewer.getObjects({ selected: true });
 
-      // DEBUG: Log raw API response
-      console.group('🔬 DEBUG: Trimble API Raw Response');
-      console.log('viewer.getObjects({ selected: true }):', JSON.stringify(objectsData, null, 2));
+      // DEBUG: Log available viewer methods
+      console.group('🔬 DEBUG: Available viewer methods');
+      console.log('viewer keys:', Object.keys(viewer));
+      console.log('viewer.getObjects:', typeof viewer.getObjects);
+      console.log('viewer.getObjectProperties:', typeof viewer.getObjectProperties);
+      console.log('viewer.getObjectInfo:', typeof (viewer as any).getObjectInfo);
+      console.log('viewer.getSelectedObjects:', typeof (viewer as any).getSelectedObjects);
+      console.groupEnd();
+
+      // Try getObjects with properties parameter
+      console.group('🔬 DEBUG: Trying different getObjects calls');
+
+      // Method A: selected: true
+      const objectsData = await viewer.getObjects({ selected: true });
+      console.log('A) getObjects({ selected: true }):', JSON.stringify(objectsData, null, 2));
+
+      // Method B: selected: true, properties: true
+      try {
+        const objectsWithProps = await viewer.getObjects({ selected: true, properties: true } as any);
+        console.log('B) getObjects({ selected: true, properties: true }):', JSON.stringify(objectsWithProps, null, 2));
+      } catch (e) {
+        console.warn('B) Failed:', e);
+      }
+
+      // Method C: Try getSelectedObjects if available
+      try {
+        if (typeof (viewer as any).getSelectedObjects === 'function') {
+          const selectedObjs = await (viewer as any).getSelectedObjects();
+          console.log('C) getSelectedObjects():', JSON.stringify(selectedObjs, null, 2));
+        }
+      } catch (e) {
+        console.warn('C) Failed:', e);
+      }
+
       console.groupEnd();
 
       if (!objectsData || objectsData.length === 0) {
