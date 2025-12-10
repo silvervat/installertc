@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import * as WorkspaceAPI from 'trimble-connect-workspace-api';
 import { Sidebar } from '../components/Sidebar';
 import { AssemblyAPI } from './lib/api';
@@ -26,6 +26,9 @@ function App() {
   const [modelName, setModelName] = useState<string>('');
   const [assemblySelectionEnabled] = useState(true);
 
+  // Ref to hold latest handleSelectionChange to avoid stale closure
+  const handleSelectionChangeRef = useRef<((selection: string[]) => Promise<void>) | null>(null);
+
   // Connect to Trimble Connect - AUTOMAATNE, ei vaja mingeid API võtmeid!
   useEffect(() => {
     async function init() {
@@ -42,7 +45,10 @@ function App() {
             // Handle selection changes in viewer
             if (event === 'viewer.selectionChanged') {
               console.log('🎯 Selection changed:', data);
-              handleSelectionChange(data.selection || []);
+              // Use ref to get latest handler (avoids stale closure)
+              if (handleSelectionChangeRef.current) {
+                handleSelectionChangeRef.current(data.selection || []);
+              }
             }
           },
           30000 // 30 second timeout
@@ -93,6 +99,42 @@ function App() {
     init();
   }, []);
 
+  // Polling for selection changes (backup mechanism)
+  const lastSelectionRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (!api || loading) return;
+
+    const pollSelection = async () => {
+      try {
+        const selection = await api.viewer.getSelection();
+        const currentIds = selection || [];
+
+        // Check if selection changed
+        const lastIds = lastSelectionRef.current;
+        const changed = currentIds.length !== lastIds.length ||
+          currentIds.some((id, i) => id !== lastIds[i]);
+
+        if (changed) {
+          console.log('🔄 Polling detected selection change:', currentIds.length, 'objects');
+          lastSelectionRef.current = currentIds;
+          if (handleSelectionChangeRef.current) {
+            handleSelectionChangeRef.current(currentIds);
+          }
+        }
+      } catch (err) {
+        // Ignore polling errors
+      }
+    };
+
+    // Poll every 1 second
+    const interval = setInterval(pollSelection, 1000);
+
+    // Initial check
+    pollSelection();
+
+    return () => clearInterval(interval);
+  }, [api, loading]);
 
   // Handle selection changes from viewer
   const handleSelectionChange = useCallback(async (selection: string[]) => {
@@ -192,6 +234,11 @@ function App() {
       alert('Viga andmete laadimisel: ' + (err as Error).message);
     }
   }, [api, projectId, projectName, modelId, modelName]);
+
+  // Keep ref updated with latest handleSelectionChange
+  useEffect(() => {
+    handleSelectionChangeRef.current = handleSelectionChange;
+  }, [handleSelectionChange]);
 
   // Colorize objects in 3D view
   const colorizeObjects = useCallback(async (
