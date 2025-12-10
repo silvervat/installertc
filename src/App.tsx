@@ -1141,7 +1141,7 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden font-sans bg-white">
-      <Sidebar 
+      <Sidebar
         selectedParts={selectedParts}
         allParts={parts}
         mode={mode}
@@ -1155,6 +1155,7 @@ function App() {
         onSetSelection={handleSetSelection}
         onBulkUpdate={handleBulkUpdate}
         onDeleteData={handleDeleteData}
+        onZoomToGuid={api ? (guid) => zoomToGuid(api, guid) : undefined}
       />
     </div>
   );

@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AssemblyPart, InstallationRecord, DeliveryRecord, BoltingRecord, AppMode, DisplayField } from '../types';
-import { 
-  User, Save, Trash2, Box, Truck, BarChart3, Hammer, MousePointer2, History, AlertCircle, 
+import {
+  User, Save, Trash2, Box, Truck, BarChart3, Hammer, MousePointer2, History, AlertCircle,
   ChevronRight, ChevronDown, Plus, X, ChevronsUpDown, CalendarDays, Settings, Wrench, AlertTriangle,
   Clock, TrendingUp, CheckCircle, PieChart, Construction, AlertOctagon, RefreshCcw,
-  TowerControl, Forklift, Hand, HelpCircle, Pencil, Calendar, XCircle, Info, ArrowLeft, CheckSquare
+  TowerControl, Forklift, Hand, HelpCircle, Pencil, Calendar, XCircle, Info, ArrowLeft, CheckSquare,
+  Search, Target
 } from 'lucide-react';
 import { DEFAULT_INSTALLER, DEFAULT_VEHICLE } from '../constants';
 
@@ -897,10 +898,11 @@ interface SidebarProps {
   onSetSelection: (ids: string[]) => void;
   onBulkUpdate: (ids: string[], mode: AppMode, data: any) => void;
   onDeleteData: (ids: string[], mode: AppMode) => void;
+  onZoomToGuid?: (guid: string) => Promise<boolean>;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ 
-  selectedParts, 
+export const Sidebar: React.FC<SidebarProps> = ({
+  selectedParts,
   allParts,
   mode,
   assemblySelectionEnabled,
@@ -912,13 +914,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRemovePart,
   onSetSelection,
   onBulkUpdate,
-  onDeleteData
+  onDeleteData,
+  onZoomToGuid
 }) => {
   // Form State
   const [installers, setInstallers] = useState<string[]>([DEFAULT_INSTALLER]);
   const [vehicle, setVehicle] = useState(DEFAULT_VEHICLE);
   const [singleInstaller, setSingleInstaller] = useState(DEFAULT_INSTALLER); // For Bolts
   const [date, setDate] = useState(getTodayIso());
+
+  // GUID Search State
+  const [guidSearchOpen, setGuidSearchOpen] = useState(false);
+  const [guidSearchValue, setGuidSearchValue] = useState('');
+  const [guidSearchLoading, setGuidSearchLoading] = useState(false);
   
   // Installation Method State
   const [installMethod, setInstallMethod] = useState<string>('Kraana');
@@ -1411,14 +1419,89 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </h1>
           <p className="text-xs text-slate-500 mt-1">Trimble Connect Laiendus</p>
         </div>
-        <button 
-          onClick={() => setSettingsOpen(!settingsOpen)}
-          className="text-gray-400 hover:text-gray-600 transition-colors p-1"
-          title="Seaded"
-        >
-          <Settings size={18} />
-        </button>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setGuidSearchOpen(!guidSearchOpen)}
+            className="text-gray-400 hover:text-blue-600 transition-colors p-1"
+            title="Otsi GUID järgi"
+          >
+            <Target size={18} />
+          </button>
+          <button
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            title="Seaded"
+          >
+            <Settings size={18} />
+          </button>
+        </div>
       </div>
+
+      {/* GUID SEARCH PANEL */}
+      {guidSearchOpen && (
+        <div className="p-4 border-b border-gray-200 bg-blue-50">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-xs font-bold text-blue-800 flex items-center gap-1">
+              <Target size={14} />
+              Otsi GUID järgi
+            </h3>
+            <button onClick={() => setGuidSearchOpen(false)}>
+              <X size={16} className="text-gray-400 hover:text-gray-600" />
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Sisesta IFC GUID..."
+              value={guidSearchValue}
+              onChange={(e) => setGuidSearchValue(e.target.value)}
+              className="flex-1 text-xs p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && guidSearchValue.trim() && onZoomToGuid) {
+                  setGuidSearchLoading(true);
+                  onZoomToGuid(guidSearchValue.trim()).then((found) => {
+                    setGuidSearchLoading(false);
+                    if (found) {
+                      setGuidSearchValue('');
+                      setGuidSearchOpen(false);
+                    } else {
+                      alert('Objekti ei leitud selle GUID-iga');
+                    }
+                  });
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                if (guidSearchValue.trim() && onZoomToGuid) {
+                  setGuidSearchLoading(true);
+                  onZoomToGuid(guidSearchValue.trim()).then((found) => {
+                    setGuidSearchLoading(false);
+                    if (found) {
+                      setGuidSearchValue('');
+                      setGuidSearchOpen(false);
+                    } else {
+                      alert('Objekti ei leitud selle GUID-iga');
+                    }
+                  });
+                }
+              }}
+              disabled={!guidSearchValue.trim() || guidSearchLoading || !onZoomToGuid}
+              className="px-3 py-2 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {guidSearchLoading ? (
+                <RefreshCcw size={14} className="animate-spin" />
+              ) : (
+                <Search size={14} />
+              )}
+              Otsi
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Kopeeri GUID Supabase'ist ja kleebi siia, et zoomida objekti juurde.
+          </p>
+        </div>
+      )}
 
       {/* SETTINGS OVERLAY (SIDEBAR) */}
       {settingsOpen && (
