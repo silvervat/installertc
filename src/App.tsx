@@ -1,14 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import * as WorkspaceAPI from 'trimble-connect-workspace-api';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar } from '../components/Sidebar';
 import { AssemblyAPI } from './lib/api';
-import type { 
-  AssemblyPart, 
-  InstallationRecord, 
-  DeliveryRecord, 
-  BoltingRecord, 
-  AppMode 
-} from './types';
+import type {
+  AssemblyPart,
+  InstallationRecord,
+  DeliveryRecord,
+  BoltingRecord,
+  AppMode
+} from '../types';
 
 function App() {
   // Trimble Connect state
