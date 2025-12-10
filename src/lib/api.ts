@@ -92,20 +92,13 @@ export class AssemblyAPI {
       teklaData: partsToUpsert[0]?.tekla_data
     });
 
-    // First try to update existing records, then insert new ones
-    // This handles the unique_part constraint properly
-    const guids = partsToUpsert.map(p => p.guid);
-
-    // Delete existing records with same GUIDs (to avoid constraint violation)
-    await supabase
+    // Insert new records - Supabase will auto-handle based on primary key
+    const { data, error } = await supabase
       .from('assembly_parts')
-      .delete()
-      .in('guid', guids);
+      .upsert(partsToUpsert)
+      .select();
 
-    // Insert fresh records
-    const { error } = await supabase
-      .from('assembly_parts')
-      .insert(partsToUpsert);
+    console.log('📦 Upsert result:', { data: data?.length || 0, error: error?.message });
 
     if (error) {
       console.error('Error syncing parts:', error);
