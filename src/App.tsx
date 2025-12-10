@@ -554,11 +554,18 @@ function App() {
 
           console.log(`   ✅ Got ${fullProperties?.length || 0} property sets`);
 
+          // DEBUG: Log raw structure
+          console.log('   📦 RAW fullProperties:', JSON.stringify(fullProperties, null, 2));
+
           // Merge properties into objects
-          fullObjects = objects.map((obj: any, idx: number) => ({
-            ...obj,
-            properties: fullProperties?.[idx]?.properties || obj.properties,
-          }));
+          fullObjects = objects.map((obj: any, idx: number) => {
+            const propData = fullProperties?.[idx];
+            console.log(`   📦 Object ${idx} propData:`, JSON.stringify(propData, null, 2));
+            return {
+              ...obj,
+              properties: propData?.properties || propData || obj.properties,
+            };
+          });
 
         } catch (e: any) {
           console.error(`   ❌ getObjectProperties failed:`, e.message);
