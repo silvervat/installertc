@@ -10,6 +10,177 @@ import type {
   AppMode
 } from '../types';
 
+// ============================================
+// 🔬 DIAGNOSTIC SYSTEM v2.3
+// ============================================
+const APP_VERSION = 'v2.3';
+
+const runDiagnostics = async (api: WorkspaceAPI.WorkspaceAPI) => {
+  console.log('%c╔══════════════════════════════════════════════════════════════╗', 'color: #3b82f6; font-weight: bold;');
+  console.log('%c║     🔬 RIVEST TC MANAGER - DIAGNOSTIC REPORT ' + APP_VERSION + '          ║', 'color: #3b82f6; font-weight: bold;');
+  console.log('%c╚══════════════════════════════════════════════════════════════╝', 'color: #3b82f6; font-weight: bold;');
+  console.log('%c⏰ Timestamp: ' + new Date().toISOString(), 'color: #6b7280;');
+  console.log('');
+
+  // 1. API Object Structure
+  console.group('%c📦 1. API OBJECT STRUCTURE', 'color: #10b981; font-weight: bold;');
+  console.log('API object keys:', Object.keys(api));
+  console.log('API.viewer methods:', api.viewer ? Object.keys(api.viewer) : 'N/A');
+  console.log('API.user methods:', api.user ? Object.keys(api.user) : 'N/A');
+  console.log('API.project methods:', api.project ? Object.keys(api.project) : 'N/A');
+  console.log('Full API object:', api);
+  console.groupEnd();
+
+  // 2. User Info
+  console.group('%c👤 2. USER INFO', 'color: #f59e0b; font-weight: bold;');
+  try {
+    const user = await api.user.getUserDetails();
+    console.log('User details:', JSON.stringify(user, null, 2));
+    console.table({
+      'User ID': user.id || 'N/A',
+      'Name': user.name || 'N/A',
+      'Email': user.email || 'N/A',
+      'Status': '✅ OK'
+    });
+  } catch (err) {
+    console.error('❌ Failed to get user:', err);
+  }
+  console.groupEnd();
+
+  // 3. Project Info
+  console.group('%c📁 3. PROJECT INFO', 'color: #8b5cf6; font-weight: bold;');
+  try {
+    const project = await api.project.getProject();
+    console.log('Project details:', JSON.stringify(project, null, 2));
+    console.table({
+      'Project ID': project.id || 'N/A',
+      'Name': project.name || 'N/A',
+      'Description': project.description || 'N/A',
+      'Status': '✅ OK'
+    });
+  } catch (err) {
+    console.error('❌ Failed to get project:', err);
+  }
+  console.groupEnd();
+
+  // 4. Models Info
+  console.group('%c🏗️ 4. MODELS INFO', 'color: #ec4899; font-weight: bold;');
+  try {
+    const models = await api.viewer.getModels();
+    console.log('Models count:', models?.length || 0);
+    console.log('Models raw:', JSON.stringify(models, null, 2));
+    if (models && models.length > 0) {
+      models.forEach((model: any, idx: number) => {
+        console.log(`Model ${idx + 1}:`, {
+          id: model.id,
+          name: model.name,
+          type: model.type,
+          url: model.url
+        });
+      });
+    }
+  } catch (err) {
+    console.error('❌ Failed to get models:', err);
+  }
+  console.groupEnd();
+
+  // 5. Current Selection
+  console.group('%c🎯 5. CURRENT SELECTION', 'color: #ef4444; font-weight: bold;');
+  try {
+    const selection = await api.viewer.getSelection();
+    console.log('Selection count:', selection?.length || 0);
+    console.log('Selection IDs:', selection);
+
+    if (selection && selection.length > 0) {
+      // Get objects for selection
+      const objects = await api.viewer.getObjects({ selected: true });
+      console.log('Selected objects raw:', JSON.stringify(objects, null, 2));
+
+      // Get properties for first object
+      if (objects && objects.length > 0) {
+        const firstModelObjects = objects[0]?.objects || [];
+        if (firstModelObjects.length > 0) {
+          const firstObj = firstModelObjects[0];
+          console.log('First object:', firstObj);
+
+          try {
+            const props = await api.viewer.getObjectProperties([firstObj.objectRuntimeId]);
+            console.log('First object properties:', JSON.stringify(props, null, 2));
+          } catch (propErr) {
+            console.warn('Could not get properties:', propErr);
+          }
+        }
+      }
+    } else {
+      console.log('ℹ️ No objects selected');
+    }
+  } catch (err) {
+    console.error('❌ Failed to get selection:', err);
+  }
+  console.groupEnd();
+
+  // 6. Viewer State
+  console.group('%c🖥️ 6. VIEWER STATE', 'color: #06b6d4; font-weight: bold;');
+  try {
+    // Test various viewer methods
+    const viewerMethods = [
+      'getCamera',
+      'getViewpoint',
+      'getClippingPlanes',
+      'getVisibility'
+    ];
+
+    for (const method of viewerMethods) {
+      try {
+        if (typeof (api.viewer as any)[method] === 'function') {
+          const result = await (api.viewer as any)[method]();
+          console.log(`viewer.${method}():`, result);
+        }
+      } catch (e) {
+        console.log(`viewer.${method}(): ❌ Not available or error`);
+      }
+    }
+  } catch (err) {
+    console.error('❌ Viewer state error:', err);
+  }
+  console.groupEnd();
+
+  // 7. Extension Info
+  console.group('%c🧩 7. EXTENSION INFO', 'color: #84cc16; font-weight: bold;');
+  try {
+    if (api.extension) {
+      console.log('Extension object:', api.extension);
+      console.log('Extension methods:', Object.keys(api.extension));
+    } else {
+      console.log('Extension object not available');
+    }
+  } catch (err) {
+    console.error('❌ Extension info error:', err);
+  }
+  console.groupEnd();
+
+  // 8. Environment
+  console.group('%c🌍 8. ENVIRONMENT', 'color: #f97316; font-weight: bold;');
+  console.table({
+    'Window location': window.location.href,
+    'Parent origin': document.referrer || 'N/A',
+    'User Agent': navigator.userAgent.substring(0, 50) + '...',
+    'Language': navigator.language,
+    'Online': navigator.onLine ? '✅ Yes' : '❌ No'
+  });
+  console.groupEnd();
+
+  console.log('%c╔══════════════════════════════════════════════════════════════╗', 'color: #3b82f6; font-weight: bold;');
+  console.log('%c║              🔬 DIAGNOSTIC COMPLETE                          ║', 'color: #3b82f6; font-weight: bold;');
+  console.log('%c╚══════════════════════════════════════════════════════════════╝', 'color: #3b82f6; font-weight: bold;');
+
+  // Return summary
+  return {
+    timestamp: new Date().toISOString(),
+    version: APP_VERSION
+  };
+};
+
 function App() {
   // Trimble Connect state
   const [api, setApi] = useState<WorkspaceAPI.WorkspaceAPI | null>(null);
@@ -56,6 +227,9 @@ function App() {
         
         setApi(connected);
         console.log('✅ Connected to Trimble Connect');
+
+        // Run diagnostics after connection
+        await runDiagnostics(connected);
         
         // Get user info - automaatne Trimble Connect API-st
         try {
@@ -179,18 +353,72 @@ function App() {
         console.log('Objects count:', objects.length);
 
         for (const obj of objects) {
-          const props = await viewer.getObjectProperties([obj.objectRuntimeId]);
+          // API returns { id: number } - use id as runtime id
+          const runtimeId = obj.id || obj.objectRuntimeId;
+          const objectId = obj.objectId || String(runtimeId);
 
-          // DEBUG: Log each object's properties
-          console.group(`📦 Object: ${obj.objectId}`);
+          console.group(`📦 Object: ${objectId} (runtimeId: ${runtimeId})`);
           console.log('Object data:', JSON.stringify(obj, null, 2));
-          console.log('Object properties:', JSON.stringify(props, null, 2));
+
+          // Try multiple methods to get properties
+          let props: any[] = [];
+
+          // Method 1: getObjectProperties with runtime id
+          try {
+            console.log('🔍 Trying getObjectProperties([' + runtimeId + '])...');
+            props = await viewer.getObjectProperties([runtimeId]);
+            console.log('Method 1 result:', JSON.stringify(props, null, 2));
+          } catch (e) {
+            console.warn('Method 1 failed:', e);
+          }
+
+          // Method 2: getObjectPropertySets if Method 1 failed
+          if (!props || props.length === 0) {
+            try {
+              console.log('🔍 Trying getObjectPropertySets([' + runtimeId + '])...');
+              const propSets = await (viewer as any).getObjectPropertySets([runtimeId]);
+              console.log('Method 2 result:', JSON.stringify(propSets, null, 2));
+              if (propSets && propSets.length > 0) {
+                // Flatten property sets into single object
+                const flatProps: Record<string, any> = {};
+                for (const pset of propSets) {
+                  if (pset.properties) {
+                    for (const prop of pset.properties) {
+                      flatProps[prop.name] = prop.value;
+                    }
+                  }
+                }
+                props = [flatProps];
+              }
+            } catch (e) {
+              console.warn('Method 2 failed:', e);
+            }
+          }
+
+          // Method 3: Try with model context
+          if (!props || props.length === 0) {
+            try {
+              console.log('🔍 Trying getObjectProperties with model context...');
+              props = await viewer.getObjectProperties([{ modelId, objectRuntimeId: runtimeId }]);
+              console.log('Method 3 result:', JSON.stringify(props, null, 2));
+            } catch (e) {
+              console.warn('Method 3 failed:', e);
+            }
+          }
+
+          console.log('Final properties:', JSON.stringify(props, null, 2));
           console.groupEnd();
 
           if (props && props.length > 0) {
             properties.push({
-              objectId: obj.objectId,
+              objectId: objectId,
               properties: props[0] || {}
+            });
+          } else {
+            // Still add the object with empty properties so we can track it
+            properties.push({
+              objectId: objectId,
+              properties: { _runtimeId: runtimeId, _modelId: modelId }
             });
           }
         }
