@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import * as WorkspaceAPI from 'trimble-connect-workspace-api';
 import { Sidebar } from '../components/Sidebar';
 import { AssemblyAPI } from './lib/api';
@@ -26,6 +26,9 @@ function App() {
   const [modelName, setModelName] = useState<string>('');
   const [assemblySelectionEnabled] = useState(true);
 
+  // Ref to hold latest handleSelectionChange to avoid stale closure
+  const handleSelectionChangeRef = useRef<((selection: string[]) => Promise<void>) | null>(null);
+
   // Connect to Trimble Connect - AUTOMAATNE, ei vaja mingeid API võtmeid!
   useEffect(() => {
     async function init() {
@@ -42,7 +45,10 @@ function App() {
             // Handle selection changes in viewer
             if (event === 'viewer.selectionChanged') {
               console.log('🎯 Selection changed:', data);
-              handleSelectionChange(data.selection || []);
+              // Use ref to get latest handler (avoids stale closure)
+              if (handleSelectionChangeRef.current) {
+                handleSelectionChangeRef.current(data.selection || []);
+              }
             }
           },
           30000 // 30 second timeout
@@ -192,6 +198,11 @@ function App() {
       alert('Viga andmete laadimisel: ' + (err as Error).message);
     }
   }, [api, projectId, projectName, modelId, modelName]);
+
+  // Keep ref updated with latest handleSelectionChange
+  useEffect(() => {
+    handleSelectionChangeRef.current = handleSelectionChange;
+  }, [handleSelectionChange]);
 
   // Colorize objects in 3D view
   const colorizeObjects = useCallback(async (
