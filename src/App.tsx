@@ -15,6 +15,117 @@ import type {
 // ============================================
 const APP_VERSION = 'v2.5';
 
+/**
+ * Parse URL parameters
+ */
+const getUrlParams = (): { guid?: string; project?: string } => {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    guid: params.get('guid') || undefined,
+    project: params.get('project') || undefined
+  };
+};
+
+/**
+ * Find object by GUID and zoom to it
+ */
+const zoomToGuid = async (
+  api: WorkspaceAPI.WorkspaceAPI,
+  targetGuid: string
+): Promise<boolean> => {
+  console.log(`🔍 Searching for object with GUID: ${targetGuid}`);
+
+  try {
+    const viewer = api.viewer;
+
+    // Get all models
+    const models = await viewer.getModels();
+    if (!models || models.length === 0) {
+      console.warn('⚠️ No models loaded');
+      return false;
+    }
+
+    // Search through each model for the GUID
+    for (const model of models) {
+      const modelId = model.id;
+      console.log(`   Searching in model: ${model.name} (${modelId})`);
+
+      try {
+        // Get all entities from the model
+        const entities = await viewer.getEntities(modelId);
+
+        if (entities && Array.isArray(entities)) {
+          // Search for matching GUID
+          for (const entity of entities) {
+            // Get properties to check GUID
+            try {
+              const props = await viewer.getObjectProperties(
+                modelId,
+                [entity.id || entity.objectRuntimeId],
+                { includeHidden: true }
+              );
+
+              if (props && props[0]) {
+                // Check if this object has the target GUID
+                const flatProps = JSON.stringify(props[0]);
+                if (flatProps.includes(targetGuid)) {
+                  console.log(`✅ Found object with GUID ${targetGuid} in model ${model.name}`);
+
+                  // Select the object
+                  const objectId = entity.id || entity.objectRuntimeId;
+                  await viewer.setSelection([objectId]);
+
+                  // Get bounding box and zoom to it
+                  try {
+                    const boundingBoxes = await viewer.getObjectBoundingBoxes([objectId]);
+                    if (boundingBoxes && boundingBoxes.length > 0) {
+                      const bb = boundingBoxes[0];
+                      // Calculate center of bounding box
+                      const center = {
+                        x: (bb.min.x + bb.max.x) / 2,
+                        y: (bb.min.y + bb.max.y) / 2,
+                        z: (bb.min.z + bb.max.z) / 2
+                      };
+
+                      // Set camera to look at the object
+                      const camera = await viewer.getCamera();
+                      await viewer.setCamera({
+                        ...camera,
+                        lookAt: center,
+                        position: {
+                          x: center.x + 10,
+                          y: center.y + 10,
+                          z: center.z + 10
+                        }
+                      });
+
+                      console.log(`📍 Zoomed to object at:`, center);
+                    }
+                  } catch (zoomErr) {
+                    console.warn('⚠️ Could not zoom to object:', zoomErr);
+                  }
+
+                  return true;
+                }
+              }
+            } catch (propErr) {
+              // Continue searching
+            }
+          }
+        }
+      } catch (modelErr) {
+        console.warn(`⚠️ Could not search model ${model.name}:`, modelErr);
+      }
+    }
+
+    console.warn(`⚠️ Object with GUID ${targetGuid} not found`);
+    return false;
+  } catch (err) {
+    console.error('❌ Error searching for GUID:', err);
+    return false;
+  }
+};
+
 // ============================================
 // 📦 HELPER FUNCTIONS
 // ============================================
@@ -480,7 +591,22 @@ function App() {
         } catch (err) {
           console.warn('⚠️ Could not get model info:', err);
         }
-        
+
+        // Check URL parameters for deep linking
+        const urlParams = getUrlParams();
+        if (urlParams.guid) {
+          console.log('🔗 Deep link detected! GUID:', urlParams.guid);
+          // Wait a bit for models to fully load before searching
+          setTimeout(async () => {
+            const found = await zoomToGuid(connected, urlParams.guid!);
+            if (found) {
+              console.log('✅ Deep link successful - zoomed to object');
+            } else {
+              console.warn('⚠️ Deep link failed - object not found');
+            }
+          }, 2000);
+        }
+
         setLoading(false);
       } catch (err: any) {
         setError(err?.message || 'Failed to connect to Trimble Connect');
