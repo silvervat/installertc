@@ -151,7 +151,7 @@ const runDiagnostics = async (api: WorkspaceAPI.WorkspaceAPI) => {
   // 2. User Info
   console.group('%c👤 2. USER INFO', 'color: #f59e0b; font-weight: bold;');
   try {
-    const user = await api.user.getUserDetails();
+    const user = await api.user.getUser();
     console.log('User details:', JSON.stringify(user, null, 2));
     console.table({
       'User ID': user.id || 'N/A',
@@ -385,7 +385,7 @@ function App() {
         
         // Get user info - automaatne Trimble Connect API-st
         try {
-          const user = await connected.user.getUserDetails();
+          const user = await connected.user.getUser();
           setUserName(user.name || user.email || 'Kasutaja');
           console.log('👤 User:', user.name || user.email);
         } catch (err) {
