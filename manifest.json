@@ -1,0 +1,83 @@
+{
+  "manifestVersion": 2,
+  "id": "assembly-installer",
+  "version": "1.0.0",
+  "productName": "Assembly Installer",
+  "publisher": "Silver Vatsel",
+  "description": {
+    "en": "Track assembly installation, delivery and bolting progress in Trimble Connect with real-time database sync",
+    "et": "Jälgi koostedetailide paigaldust, tarnet ja polditud staatust Trimble Connectis reaalajas andmebaasi sünkroniseerimisega"
+  },
+  "supportedPlatforms": [
+    "web"
+  ],
+  "extensions": [
+    {
+      "type": "panel",
+      "name": "Assembly Installer",
+      "description": {
+        "en": "Installation progress tracking with delivery and bolting management",
+        "et": "Paigalduse jälgimine koos tarne ja poltimise haldamisega"
+      },
+      "icon": "src/icon.png",
+      "autoLoad": false,
+      "main": "index.html",
+      "defaultDimensions": {
+        "width": 420,
+        "height": 900
+      },
+      "minDimensions": {
+        "width": 380,
+        "height": 600
+      },
+      "permissions": [
+        "viewer.read",
+        "viewer.write",
+        "viewer.selection",
+        "project.read",
+        "model.read",
+        "user.read"
+      ]
+    }
+  ],
+  "author": {
+    "name": "Silver Vatsel",
+    "email": "info@silvervat.ee"
+  },
+  "homepage": "https://github.com/yourusername/assembly-installer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/assembly-installer.git"
+  },
+  "license": "MIT",
+  "categories": [
+    "productivity",
+    "construction",
+    "bim",
+    "tracking"
+  ],
+  "keywords": [
+    "assembly",
+    "installation",
+    "tracking",
+    "delivery",
+    "bolting",
+    "construction",
+    "progress",
+    "supabase"
+  ],
+  "screenshots": [],
+  "changelog": {
+    "1.0.0": [
+      "Initial release",
+      "Installation tracking with installer names and methods",
+      "Delivery tracking with vehicle and times",
+      "Bolting progress tracking",
+      "Real-time Supabase database sync",
+      "3D viewer object colorization",
+      "History and statistics views",
+      "Bulk edit and delete functionality",
+      "Activity logs for all changes"
+    ]
+  }
+}
