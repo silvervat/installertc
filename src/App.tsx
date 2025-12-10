@@ -353,18 +353,72 @@ function App() {
         console.log('Objects count:', objects.length);
 
         for (const obj of objects) {
-          const props = await viewer.getObjectProperties([obj.objectRuntimeId]);
+          // API returns { id: number } - use id as runtime id
+          const runtimeId = obj.id || obj.objectRuntimeId;
+          const objectId = obj.objectId || String(runtimeId);
 
-          // DEBUG: Log each object's properties
-          console.group(`📦 Object: ${obj.objectId}`);
+          console.group(`📦 Object: ${objectId} (runtimeId: ${runtimeId})`);
           console.log('Object data:', JSON.stringify(obj, null, 2));
-          console.log('Object properties:', JSON.stringify(props, null, 2));
+
+          // Try multiple methods to get properties
+          let props: any[] = [];
+
+          // Method 1: getObjectProperties with runtime id
+          try {
+            console.log('🔍 Trying getObjectProperties([' + runtimeId + '])...');
+            props = await viewer.getObjectProperties([runtimeId]);
+            console.log('Method 1 result:', JSON.stringify(props, null, 2));
+          } catch (e) {
+            console.warn('Method 1 failed:', e);
+          }
+
+          // Method 2: getObjectPropertySets if Method 1 failed
+          if (!props || props.length === 0) {
+            try {
+              console.log('🔍 Trying getObjectPropertySets([' + runtimeId + '])...');
+              const propSets = await (viewer as any).getObjectPropertySets([runtimeId]);
+              console.log('Method 2 result:', JSON.stringify(propSets, null, 2));
+              if (propSets && propSets.length > 0) {
+                // Flatten property sets into single object
+                const flatProps: Record<string, any> = {};
+                for (const pset of propSets) {
+                  if (pset.properties) {
+                    for (const prop of pset.properties) {
+                      flatProps[prop.name] = prop.value;
+                    }
+                  }
+                }
+                props = [flatProps];
+              }
+            } catch (e) {
+              console.warn('Method 2 failed:', e);
+            }
+          }
+
+          // Method 3: Try with model context
+          if (!props || props.length === 0) {
+            try {
+              console.log('🔍 Trying getObjectProperties with model context...');
+              props = await viewer.getObjectProperties([{ modelId, objectRuntimeId: runtimeId }]);
+              console.log('Method 3 result:', JSON.stringify(props, null, 2));
+            } catch (e) {
+              console.warn('Method 3 failed:', e);
+            }
+          }
+
+          console.log('Final properties:', JSON.stringify(props, null, 2));
           console.groupEnd();
 
           if (props && props.length > 0) {
             properties.push({
-              objectId: obj.objectId,
+              objectId: objectId,
               properties: props[0] || {}
+            });
+          } else {
+            // Still add the object with empty properties so we can track it
+            properties.push({
+              objectId: objectId,
+              properties: { _runtimeId: runtimeId, _modelId: modelId }
             });
           }
         }
