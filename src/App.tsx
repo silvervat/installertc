@@ -50,6 +50,7 @@ const getSelectedObjects = async (api: WorkspaceAPI.WorkspaceAPI): Promise<Array
 /**
  * Flatten object properties into a simple key-value structure
  * Extracts GUID and all Tekla/IFC properties
+ * Handles multiple property formats from Trimble Connect API
  */
 const flattenProps = async (
   obj: any,
@@ -71,20 +72,60 @@ const flattenProps = async (
   if (obj?.guid) guid = obj.guid;
   if (obj?.GUID) guid = obj.GUID;
   if (obj?.GlobalId) guid = obj.GlobalId;
+  if (obj?.guidIfc) guid = obj.guidIfc;
 
   // Process properties if they exist
   const props = obj?.properties || [];
+
+  // Helper to recursively flatten nested objects
+  const flattenObject = (obj: any, prefix: string = '') => {
+    if (!obj || typeof obj !== 'object') return;
+
+    Object.entries(obj).forEach(([key, value]) => {
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // Recursively flatten nested objects
+        flattenObject(value, fullKey);
+
+        // Also check for GUID in nested objects
+        if ((value as any).guidIfc) {
+          if (!guid) guid = String((value as any).guidIfc);
+          result.GUID_IFC = (value as any).guidIfc;
+        }
+        if ((value as any).GUID_MS || (value as any).guidMs) {
+          result.GUID_MS = (value as any).GUID_MS || (value as any).guidMs;
+        }
+      } else {
+        result[fullKey] = value;
+
+        // Also store without prefix for easier access
+        if (!result[key]) {
+          result[key] = value;
+        }
+      }
+
+      // Check for GUID fields
+      if (key === 'GUID' || key === 'GlobalId' || key === 'guidIfc' || key === 'IFC GUID') {
+        if (!guid && value) guid = String(value);
+        result.GUID_IFC = value;
+      }
+      if (key === 'GUID_MS' || key === 'MS_GUID' || key === 'guidMs') {
+        result.GUID_MS = value;
+      }
+    });
+  };
 
   if (Array.isArray(props)) {
     // Properties come as array of property sets
     for (const propSet of props) {
       const setName = propSet?.name || propSet?.propertySetName || '';
-      const properties = propSet?.properties || [];
+      const properties = propSet?.properties || propSet?.data || [];
 
       if (Array.isArray(properties)) {
         for (const prop of properties) {
           const propName = prop?.name || prop?.propertyName || '';
-          const propValue = prop?.value ?? prop?.propertyValue ?? '';
+          const propValue = prop?.value ?? prop?.propertyValue ?? prop?.data ?? '';
 
           if (propName) {
             // Create key with property set prefix if available
@@ -97,33 +138,58 @@ const flattenProps = async (
             }
 
             // Check for GUID fields
-            if (propName === 'GUID' || propName === 'GlobalId' || propName === 'IFC GUID') {
+            if (propName === 'GUID' || propName === 'GlobalId' || propName === 'guidIfc') {
               if (!guid && propValue) guid = String(propValue);
-              if (propName === 'GUID' || propName === 'GlobalId') result.GUID_IFC = propValue;
+              result.GUID_IFC = propValue;
             }
-            if (propName === 'GUID_MS' || propName === 'MS_GUID') {
+            if (propName === 'GUID_MS' || propName === 'MS_GUID' || propName === 'guidMs') {
               result.GUID_MS = propValue;
             }
           }
         }
+      } else if (typeof properties === 'object') {
+        // Properties come as object within property set
+        flattenObject(properties, setName);
+      }
+
+      // Also flatten the propSet itself if it has direct properties
+      if (typeof propSet === 'object') {
+        flattenObject(propSet, setName);
       }
     }
   } else if (typeof props === 'object') {
-    // Properties come as object
-    Object.entries(props).forEach(([key, value]) => {
-      result[key] = value;
+    // Properties come as object directly
+    flattenObject(props, '');
+  }
 
-      if ((key === 'GUID' || key === 'GlobalId') && value) {
-        if (!guid) guid = String(value);
-        result.GUID_IFC = value;
+  // Also check object itself for additional properties
+  if (obj && typeof obj === 'object') {
+    // Check ReferenceObject for GUID
+    if (obj.ReferenceObject) {
+      if (obj.ReferenceObject.guidIfc && !guid) {
+        guid = obj.ReferenceObject.guidIfc;
+        result.GUID_IFC = obj.ReferenceObject.guidIfc;
       }
-    });
+      if (obj.ReferenceObject.GUID_MS || obj.ReferenceObject.guidMs) {
+        result.GUID_MS = obj.ReferenceObject.GUID_MS || obj.ReferenceObject.guidMs;
+      }
+    }
+
+    // Check Product for name/type
+    if (obj.Product) {
+      result.ProductName = obj.Product.Product_Name || obj.Product.name;
+      result.ProductDescription = obj.Product.Product_Description || obj.Product.description;
+      result.ProductType = obj.Product.Product_Object_Type || obj.Product.type;
+    }
   }
 
   // Fallback GUID from result or generate from runtime ID
   if (!guid) {
-    guid = result.GUID || result.GlobalId || result['IFC GUID'] || `runtime-${modelId}-${objectId}`;
+    guid = result.GUID || result.GUID_IFC || result.GlobalId || result.guidIfc ||
+           result['IFC GUID'] || `runtime-${modelId}-${objectId}`;
   }
+
+  console.log(`   🔍 flattenProps result for ${objectId}: GUID=${guid}, keys=${Object.keys(result).length}`);
 
   return {
     objectId,
