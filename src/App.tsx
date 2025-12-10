@@ -183,24 +183,24 @@ function classifyGuid(guid: string): "IFC" | "MS" | "UNKNOWN" {
 
 /**
  * Flatten object properties into a simple key-value structure
- * Extracts GUID using multiple methods (Assembly Exporter approach)
- * FIXED: Now uses convertToObjectIds and getObjectMetadata
+ * Extracts GUID using pre-loaded batch data (OPTIMIZED - no API calls in loop!)
+ * @param preloadedMetadata - Pre-loaded from batch getObjectMetadata call
+ * @param preloadedExternalId - Pre-loaded from batch convertToObjectIds call
  */
-const flattenProps = async (
+const flattenProps = (
   obj: any,
   modelId: string,
-  api: WorkspaceAPI.WorkspaceAPI
-): Promise<{
+  preloadedMetadata?: any,
+  preloadedExternalId?: string
+): {
   objectId: string;
   guid: string;
   properties: Record<string, any>;
-}> => {
+} => {
   const result: Record<string, any> = {};
   const propMap = new Map<string, string>();
   const runtimeId = obj?.id || obj?.objectRuntimeId;
   const objectId = String(runtimeId);
-
-  console.log(`\n   🔍 flattenProps for object ${objectId}:`);
 
   // Helper to add property
   const push = (setName: string, name: string, value: any) => {
@@ -224,8 +224,6 @@ const flattenProps = async (
   const props = obj?.properties || [];
 
   if (Array.isArray(props)) {
-    console.log(`      Found ${props.length} property sets`);
-
     props.forEach((propSet: any) => {
       const setName = propSet?.name || propSet?.propertySetName || "Unknown";
       const setProps = propSet?.properties || propSet?.data || [];
@@ -244,8 +242,6 @@ const flattenProps = async (
     Object.entries(props).forEach(([key, val]) => push("Properties", key, val));
   }
 
-  console.log(`      Extracted ${propMap.size} properties from property sets`);
-
   // ═══════════════════════════════════════════════════════════
   // EXTRACT STANDARD FIELDS
   // ═══════════════════════════════════════════════════════════
@@ -261,99 +257,51 @@ const flattenProps = async (
   }
 
   // ═══════════════════════════════════════════════════════════
-  // EXTRACT GUID - MULTIPLE METHODS (ASSEMBLY EXPORTER APPROACH)
+  // EXTRACT GUID - USE PRE-LOADED DATA (NO API CALLS!)
   // ═══════════════════════════════════════════════════════════
   let guidIfc = "";
   let guidMs = "";
 
-  // METHOD 1: Search in all properties for GUID-like keys
-  console.log(`      🔍 METHOD 1: Searching in properties...`);
+  // METHOD 1: Search in properties for GUID-like keys
   for (const [k, v] of propMap) {
     if (!/guid|globalid|tekla_guid|id_guid/i.test(k)) continue;
 
     const cls = classifyGuid(v);
     if (cls === "IFC" && !guidIfc) {
       guidIfc = v;
-      console.log(`         ✅ Found IFC GUID in properties: ${guidIfc}`);
     }
     if (cls === "MS" && !guidMs) {
       guidMs = v;
-      console.log(`         ✅ Found MS GUID in properties: ${guidMs}`);
     }
   }
 
-  // Also check direct object properties
+  // Check direct object properties
   if (!guidIfc && obj?.guidIfc) {
     guidIfc = String(obj.guidIfc);
-    console.log(`         ✅ Found IFC GUID in obj.guidIfc: ${guidIfc}`);
   }
   if (!guidIfc && obj?.GlobalId && classifyGuid(obj.GlobalId) === "IFC") {
     guidIfc = String(obj.GlobalId);
-    console.log(`         ✅ Found IFC GUID in obj.GlobalId: ${guidIfc}`);
   }
   if (!guidMs && obj?.ReferenceObject?.globalId) {
     guidMs = String(obj.ReferenceObject.globalId);
-    console.log(`         ✅ Found MS GUID in ReferenceObject: ${guidMs}`);
   }
 
-  // METHOD 2: getObjectMetadata (MS/Tekla GUID)
-  if (!guidMs) {
-    console.log(`      🔍 METHOD 2: Trying getObjectMetadata...`);
-    try {
-      const viewer = api.viewer as any;
-      if (typeof viewer.getObjectMetadata === 'function') {
-        const metaArr = await viewer.getObjectMetadata(modelId, [runtimeId]);
-        const metaOne = Array.isArray(metaArr) ? metaArr[0] : metaArr;
-
-        if (metaOne?.globalId) {
-          guidMs = String(metaOne.globalId);
-          result.GUID_MS = guidMs;
-          result["ReferenceObject.GlobalId"] = guidMs;
-          console.log(`         ✅ Found MS GUID in metadata: ${guidMs}`);
-        } else {
-          console.log(`         ⚠️ No globalId in metadata`);
-        }
-      } else {
-        console.log(`         ⚠️ getObjectMetadata not available`);
-      }
-    } catch (e: any) {
-      console.log(`         ❌ getObjectMetadata failed: ${e.message}`);
-    }
+  // METHOD 2: Use pre-loaded metadata (MS/Tekla GUID)
+  if (!guidMs && preloadedMetadata?.globalId) {
+    guidMs = String(preloadedMetadata.globalId);
+    result["ReferenceObject.GlobalId"] = guidMs;
   }
 
-  // METHOD 3: convertToObjectIds (IFC GUID) ⭐ THIS IS KEY!
-  if (!guidIfc) {
-    console.log(`      🔍 METHOD 3: Trying convertToObjectIds...`);
-    try {
-      const viewer = api.viewer as any;
-      if (typeof viewer.convertToObjectIds === 'function') {
-        const externalIds = await viewer.convertToObjectIds(modelId, [runtimeId]);
-        const externalId = externalIds?.[0];
-
-        if (externalId) {
-          const cls = classifyGuid(externalId);
-          if (cls === "IFC") {
-            guidIfc = externalId;
-            console.log(`         ✅ Found IFC GUID from convertToObjectIds: ${guidIfc}`);
-          } else if (cls === "MS" && !guidMs) {
-            guidMs = externalId;
-            console.log(`         ✅ Found MS GUID from convertToObjectIds: ${guidMs}`);
-          } else {
-            console.log(`         ⚠️ Got external ID but unknown format: ${externalId}`);
-            // Use it anyway as fallback
-            if (!guidIfc && !guidMs) {
-              guidIfc = externalId;
-              console.log(`         📌 Using as fallback GUID: ${externalId}`);
-            }
-          }
-        } else {
-          console.log(`         ⚠️ convertToObjectIds returned empty`);
-        }
-      } else {
-        console.log(`         ⚠️ convertToObjectIds not available`);
-      }
-    } catch (e: any) {
-      console.log(`         ❌ convertToObjectIds failed: ${e.message}`);
+  // METHOD 3: Use pre-loaded external ID (IFC GUID) ⭐ KEY!
+  if (!guidIfc && preloadedExternalId) {
+    const cls = classifyGuid(preloadedExternalId);
+    if (cls === "IFC") {
+      guidIfc = preloadedExternalId;
+    } else if (cls === "MS" && !guidMs) {
+      guidMs = preloadedExternalId;
+    } else if (!guidIfc && !guidMs) {
+      // Use as fallback
+      guidIfc = preloadedExternalId;
     }
   }
 
@@ -363,11 +311,6 @@ const flattenProps = async (
   result.GUID = finalGuid;
   result.GUID_IFC = guidIfc;
   result.GUID_MS = guidMs;
-
-  console.log(`      📌 Final GUID: ${finalGuid}`);
-  console.log(`      📌 GUID_IFC: ${guidIfc || '(empty)'}`);
-  console.log(`      📌 GUID_MS: ${guidMs || '(empty)'}`);
-  console.log(`      📌 Total properties: ${Object.keys(result).length}`);
 
   return {
     objectId,
@@ -862,12 +805,69 @@ function App() {
           }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // BATCH LOAD GUID DATA (OPTIMIZED - 2 calls instead of N*2)
+        // ═══════════════════════════════════════════════════════════
+        console.log(`\n   🔄 BATCH loading GUID data for ${objectRuntimeIds.length} objects...`);
+
+        // BATCH 1: Get all metadata (MS/Tekla GUID)
+        const metadataMap = new Map<number, any>();
+        try {
+          console.log(`      ⏳ Batch getObjectMetadata...`);
+          const viewerAny = viewer as any;
+          if (typeof viewerAny.getObjectMetadata === 'function') {
+            const allMetadata = await viewerAny.getObjectMetadata(currentModelId, objectRuntimeIds);
+            if (Array.isArray(allMetadata)) {
+              allMetadata.forEach((meta: any, idx: number) => {
+                const runtimeId = objectRuntimeIds[idx];
+                if (meta && runtimeId) {
+                  metadataMap.set(runtimeId, meta);
+                }
+              });
+              console.log(`      ✅ Got metadata for ${metadataMap.size} objects`);
+            }
+          } else {
+            console.log(`      ⚠️ getObjectMetadata not available`);
+          }
+        } catch (e: any) {
+          console.warn(`      ⚠️ Batch getObjectMetadata failed: ${e.message}`);
+        }
+
+        // BATCH 2: Convert to external IDs (IFC GUID)
+        const externalIdMap = new Map<number, string>();
+        try {
+          console.log(`      ⏳ Batch convertToObjectIds...`);
+          const viewerAny = viewer as any;
+          if (typeof viewerAny.convertToObjectIds === 'function') {
+            const allExternalIds = await viewerAny.convertToObjectIds(currentModelId, objectRuntimeIds);
+            if (Array.isArray(allExternalIds)) {
+              allExternalIds.forEach((extId: any, idx: number) => {
+                const runtimeId = objectRuntimeIds[idx];
+                if (extId && runtimeId) {
+                  externalIdMap.set(runtimeId, String(extId));
+                }
+              });
+              console.log(`      ✅ Got external IDs for ${externalIdMap.size} objects`);
+            }
+          } else {
+            console.log(`      ⚠️ convertToObjectIds not available`);
+          }
+        } catch (e: any) {
+          console.warn(`      ⚠️ Batch convertToObjectIds failed: ${e.message}`);
+        }
+
         // Flatten each object's properties + ADD METADATA
-        console.log(`   🔄 Flattening ${fullObjects.length} objects...`);
+        console.log(`\n   🔄 Flattening ${fullObjects.length} objects with pre-loaded GUID data...`);
 
         for (const obj of fullObjects) {
           try {
-            const flattened = await flattenProps(obj, currentModelId, api);
+            const runtimeId = Number(obj?.id);
+            const flattened = flattenProps(
+              obj,
+              currentModelId,
+              metadataMap.get(runtimeId),
+              externalIdMap.get(runtimeId)
+            );
 
             // ═══════════════════════════════════════════════════════════
             // ADD METADATA FIELDS

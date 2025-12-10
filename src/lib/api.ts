@@ -95,8 +95,7 @@ export class AssemblyAPI {
     const { error } = await supabase
       .from('assembly_parts')
       .upsert(partsToUpsert, {
-        onConflict: 'guid,project_id',
-        ignoreDuplicates: false
+        onConflict: 'guid'
       });
 
     if (error) {
