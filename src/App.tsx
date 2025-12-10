@@ -520,12 +520,107 @@ const runDiagnostics = async (api: WorkspaceAPI.WorkspaceAPI) => {
   };
 };
 
+/**
+ * Set model to grey/xray mode for visual loading feedback
+ */
+const setModelGrey = async (
+  api: WorkspaceAPI.WorkspaceAPI,
+  grey: boolean
+): Promise<void> => {
+  try {
+    const viewer = api.viewer as any;
+    const models = await viewer.getModels();
+
+    if (!models || models.length === 0) return;
+
+    for (const model of models) {
+      const modelId = model.id;
+      try {
+        if (grey) {
+          // Set to XRAY/transparent mode
+          if (typeof viewer.setModelRenderMode === 'function') {
+            await viewer.setModelRenderMode(modelId, 'XRAY');
+          } else if (typeof viewer.setObjectsOpacity === 'function') {
+            // Fallback: set opacity
+            const entities = await viewer.getEntities(modelId);
+            if (entities && Array.isArray(entities)) {
+              const ids = entities.map((e: any) => e.id || e.objectRuntimeId);
+              await viewer.setObjectsOpacity(ids, 0.3);
+            }
+          }
+          console.log('🎨 Model set to GREY/XRAY mode');
+        } else {
+          // Restore to normal
+          if (typeof viewer.setModelRenderMode === 'function') {
+            await viewer.setModelRenderMode(modelId, 'SOLID');
+          } else if (typeof viewer.resetObjectsOpacity === 'function') {
+            await viewer.resetObjectsOpacity();
+          }
+          console.log('🎨 Model restored to NORMAL mode');
+        }
+      } catch (modelErr) {
+        console.warn(`⚠️ Could not set model ${modelId} render mode:`, modelErr);
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ setModelGrey failed:', err);
+  }
+};
+
+/**
+ * Check if Assembly Selection is available in the model data
+ * Returns true if Tekla Assembly marks are found
+ */
+const checkAssemblySelection = (
+  parts: Array<{ properties: Record<string, any> }>
+): boolean => {
+  const hasAssemblyMarks = parts.some(part => {
+    const mark = part.properties['Tekla_Assembly.Cast_unit_Mark']
+      || part.properties['Tekla_Assembly.Assembly_Mark']
+      || part.properties['Assembly.Mark']
+      || part.properties['Mark'];
+
+    // Check if mark exists and is not empty/N/A
+    return mark && mark !== '' && mark !== 'N/A' && mark !== 'undefined';
+  });
+
+  console.log(`🔍 Assembly Selection Check: ${hasAssemblyMarks ? '✅ AVAILABLE' : '❌ NOT AVAILABLE'}`);
+  return hasAssemblyMarks;
+};
+
+/**
+ * Assembly Selection Warning Component
+ */
+const AssemblySelectionWarning: React.FC = () => (
+  <div className="p-4 mb-4 bg-yellow-50 border border-yellow-300 rounded-lg">
+    <div className="flex items-start gap-3">
+      <div className="text-2xl">⚠️</div>
+      <div className="flex-1">
+        <h3 className="font-semibold text-yellow-800 mb-2">
+          Assembly Selection puudub!
+        </h3>
+        <p className="text-sm text-yellow-700 mb-3">
+          Paigaldusandmete sisestamiseks aktiveeri Teklas Assembly Selection:
+        </p>
+        <ol className="text-sm text-yellow-700 space-y-1 ml-4 list-decimal">
+          <li>Tekla → File → Project Properties</li>
+          <li>Assembly → ✓ Assembly Selection</li>
+          <li>Ekspordi uuesti IFC fail Trimble Connect'i</li>
+        </ol>
+        <p className="text-sm text-yellow-600 mt-3 italic">
+          Praegu kuvatakse ainult üksikud detailid ilma Assembly Mark'ideta.
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
 function App() {
   // Trimble Connect state
   const [api, setApi] = useState<WorkspaceAPI.WorkspaceAPI | null>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  
+
   // App state
   const [parts, setParts] = useState<AssemblyPart[]>([]);
   const [mode, setMode] = useState<AppMode>('installation');
@@ -534,7 +629,10 @@ function App() {
   const [projectName, setProjectName] = useState<string>('');
   const [modelId, setModelId] = useState<string>('');
   const [modelName, setModelName] = useState<string>('');
-  const [assemblySelectionEnabled] = useState(true);
+
+  // NEW: Extension state management
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [assemblySelectionAvailable, setAssemblySelectionAvailable] = useState<boolean | null>(null);
 
   // Ref to hold latest handleSelectionChange to avoid stale closure
   const handleSelectionChangeRef = useRef<((selection: string[]) => Promise<void>) | null>(null);
@@ -663,8 +761,8 @@ function App() {
       }
     };
 
-    // Poll every 1 second
-    const interval = setInterval(pollSelection, 1000);
+    // Poll every 2 seconds
+    const interval = setInterval(pollSelection, 2000);
 
     // Initial check
     pollSelection();
@@ -682,6 +780,7 @@ function App() {
     if (!selection || selection.length === 0) {
       console.log('🔄 Selection cleared');
       setParts([]);
+      setAssemblySelectionAvailable(null);
       return;
     }
 
@@ -689,6 +788,10 @@ function App() {
     console.log('🎯 FULL EXTRACTION - Metadata + Tekla + Properties');
     console.log('═══════════════════════════════════════════════════════════');
     console.log(`Selected: ${selection.length} objects`);
+
+    // START: Set loading state and grey out model
+    setIsLoadingData(true);
+    await setModelGrey(api, true);
 
     try {
       const viewer = api.viewer;
@@ -935,9 +1038,21 @@ function App() {
       });
 
       // ═══════════════════════════════════════════════════════════
-      // STEP 5: Sync to Supabase
+      // STEP 5: Check Assembly Selection availability
       // ═══════════════════════════════════════════════════════════
-      console.log('\n💾 STEP 5: Syncing to Supabase...');
+      console.log('\n🔍 STEP 5: Checking Assembly Selection...');
+
+      const hasAssemblySelection = checkAssemblySelection(propertiesCollection);
+      setAssemblySelectionAvailable(hasAssemblySelection);
+
+      if (!hasAssemblySelection) {
+        console.warn('⚠️ Assembly Selection NOT available - parts will show without Assembly Mark');
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // STEP 6: Sync to Supabase
+      // ═══════════════════════════════════════════════════════════
+      console.log('\n💾 STEP 6: Syncing to Supabase...');
 
       if (propertiesCollection.length === 0) {
         throw new Error('No properties could be loaded');
@@ -954,7 +1069,7 @@ function App() {
       console.log('✅ Synced to Supabase');
 
       // ═══════════════════════════════════════════════════════════
-      // STEP 6: Load from Supabase
+      // STEP 7: Load from Supabase
       // ═══════════════════════════════════════════════════════════
       console.log('\n📥 STEP 6: Loading from Supabase...');
 
@@ -1000,6 +1115,10 @@ function App() {
     } catch (err: any) {
       console.error('❌ Error:', err);
       alert('Viga andmete laadimisel: ' + err.message);
+    } finally {
+      // END: Restore loading state and model appearance
+      setIsLoadingData(false);
+      setModelGrey(api, false).catch(() => {}); // Restore model, ignore errors
     }
   }, [api, projectId, projectName, modelId, modelName]);
 
@@ -1221,22 +1340,39 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden font-sans bg-white">
-      <Sidebar
-        selectedParts={selectedParts}
-        allParts={parts}
-        mode={mode}
-        assemblySelectionEnabled={assemblySelectionEnabled}
-        onModeChange={setMode}
-        onSaveInstallation={handleSaveInstallation}
-        onSaveDelivery={handleSaveDelivery}
-        onSaveBolting={handleSaveBolting}
-        onClearSelection={handleClearSelection}
-        onRemovePart={handleRemovePart}
-        onSetSelection={handleSetSelection}
-        onBulkUpdate={handleBulkUpdate}
-        onDeleteData={handleDeleteData}
-        onZoomToGuid={api ? (guid) => zoomToGuid(api, guid) : undefined}
-      />
+      {/* Loading overlay */}
+      {isLoadingData && (
+        <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-4 shadow-lg flex items-center gap-3">
+            <div className="animate-spin w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full" />
+            <span className="text-sm text-gray-700">Laaditakse andmeid...</span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col w-full h-full">
+        {/* Assembly Selection Warning */}
+        {assemblySelectionAvailable === false && (
+          <AssemblySelectionWarning />
+        )}
+
+        <Sidebar
+          selectedParts={selectedParts}
+          allParts={parts}
+          mode={mode}
+          assemblySelectionEnabled={assemblySelectionAvailable !== false}
+          onModeChange={setMode}
+          onSaveInstallation={handleSaveInstallation}
+          onSaveDelivery={handleSaveDelivery}
+          onSaveBolting={handleSaveBolting}
+          onClearSelection={handleClearSelection}
+          onRemovePart={handleRemovePart}
+          onSetSelection={handleSetSelection}
+          onBulkUpdate={handleBulkUpdate}
+          onDeleteData={handleDeleteData}
+          onZoomToGuid={api ? (guid) => zoomToGuid(api, guid) : undefined}
+        />
+      </div>
     </div>
   );
 }
