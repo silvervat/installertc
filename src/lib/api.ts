@@ -92,9 +92,13 @@ export class AssemblyAPI {
       teklaData: partsToUpsert[0]?.tekla_data
     });
 
-    const { error } = await supabase
+    // Insert new records - Supabase will auto-handle based on primary key
+    const { data, error } = await supabase
       .from('assembly_parts')
-      .upsert(partsToUpsert);
+      .upsert(partsToUpsert)
+      .select();
+
+    console.log('📦 Upsert result:', { data: data?.length || 0, error: error?.message });
 
     if (error) {
       console.error('Error syncing parts:', error);
