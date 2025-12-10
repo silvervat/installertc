@@ -1407,7 +1407,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <Box className="text-blue-600" />
-            CONSIVA TC manager v2.1
+            RIVEST TC manager v2.2
           </h1>
           <p className="text-xs text-slate-500 mt-1">Trimble Connect Laiendus</p>
         </div>
