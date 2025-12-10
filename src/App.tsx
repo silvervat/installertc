@@ -746,13 +746,18 @@ function App() {
 
           console.log(`   ✅ Got ${fullProperties?.length || 0} property sets`);
 
-          // DEBUG: Log raw structure
-          console.log('   📦 RAW fullProperties:', JSON.stringify(fullProperties, null, 2));
+          // DEBUG: Log raw structure (handle BigInt)
+          const safeStringify = (obj: any) => {
+            return JSON.stringify(obj, (key, value) =>
+              typeof value === 'bigint' ? value.toString() : value
+            , 2);
+          };
+          console.log('   📦 RAW fullProperties:', safeStringify(fullProperties));
 
           // Merge properties into objects
           fullObjects = objects.map((obj: any, idx: number) => {
             const propData = fullProperties?.[idx];
-            console.log(`   📦 Object ${idx} propData:`, JSON.stringify(propData, null, 2));
+            console.log(`   📦 Object ${idx} propData:`, safeStringify(propData));
             return {
               ...obj,
               properties: propData?.properties || propData || obj.properties,
@@ -1141,7 +1146,7 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden font-sans bg-white">
-      <Sidebar 
+      <Sidebar
         selectedParts={selectedParts}
         allParts={parts}
         mode={mode}
@@ -1155,6 +1160,7 @@ function App() {
         onSetSelection={handleSetSelection}
         onBulkUpdate={handleBulkUpdate}
         onDeleteData={handleDeleteData}
+        onZoomToGuid={api ? (guid) => zoomToGuid(api, guid) : undefined}
       />
     </div>
   );
