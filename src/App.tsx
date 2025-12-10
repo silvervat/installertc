@@ -2,6 +2,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import * as WorkspaceAPI from 'trimble-connect-workspace-api';
 import { Sidebar } from '../components/Sidebar';
 import { AssemblyAPI } from './lib/api';
+import {
+  findGUID_AllMethods,
+  quickFindGUID,
+  getAvailableViewerMethods
+} from './lib/guid-utils';
 import type {
   AssemblyPart,
   InstallationRecord,
@@ -556,6 +561,14 @@ function App() {
         
         setApi(connected);
         console.log('✅ Connected to Trimble Connect');
+
+        // Expose API and utilities to window for console debugging
+        (window as any).API = connected;
+        (window as any).findGUID_AllMethods = () => findGUID_AllMethods(connected);
+        (window as any).quickFindGUID = (modelId: string, objectId: string) =>
+          quickFindGUID(connected, modelId, objectId);
+        (window as any).getAvailableViewerMethods = () => getAvailableViewerMethods(connected);
+        console.log('🔧 Debug utilities exposed: window.API, window.findGUID_AllMethods(), window.quickFindGUID(modelId, objectId), window.getAvailableViewerMethods()');
 
         // Run diagnostics after connection
         await runDiagnostics(connected);
