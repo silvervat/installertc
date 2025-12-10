@@ -11,9 +11,9 @@ import type {
 } from '../types';
 
 // ============================================
-// 🔬 DIAGNOSTIC SYSTEM v2.3
+// 🔬 DIAGNOSTIC SYSTEM v2.4 - DataTable API
 // ============================================
-const APP_VERSION = 'v2.3';
+const APP_VERSION = 'v2.4';
 
 const runDiagnostics = async (api: WorkspaceAPI.WorkspaceAPI) => {
   console.log('%c╔══════════════════════════════════════════════════════════════╗', 'color: #3b82f6; font-weight: bold;');
@@ -159,8 +159,43 @@ const runDiagnostics = async (api: WorkspaceAPI.WorkspaceAPI) => {
   }
   console.groupEnd();
 
-  // 8. Environment
-  console.group('%c🌍 8. ENVIRONMENT', 'color: #f97316; font-weight: bold;');
+  // 8. DataTable API
+  console.group('%c📊 8. DATATABLE API', 'color: #14b8a6; font-weight: bold;');
+  try {
+    const dataTableApi = (api as any).dataTable;
+    if (dataTableApi) {
+      console.log('DataTable API available:', Object.keys(dataTableApi));
+
+      // Try to get config
+      try {
+        const config = await dataTableApi.getDataTableConfig?.();
+        console.log('DataTable config:', JSON.stringify(config, null, 2));
+      } catch (e) {
+        console.log('getDataTableConfig: ❌ Not available or error');
+      }
+
+      // Try to get selected rows
+      try {
+        const selectedRows = await dataTableApi.getSelectedRowsData?.();
+        console.log('Selected rows data:', JSON.stringify(selectedRows, null, 2));
+      } catch (e) {
+        console.log('getSelectedRowsData: ❌ Not available or error');
+      }
+
+      // List all methods
+      for (const method of Object.keys(dataTableApi)) {
+        console.log(`  - dataTable.${method}: ${typeof dataTableApi[method]}`);
+      }
+    } else {
+      console.log('DataTable API not available');
+    }
+  } catch (err) {
+    console.error('❌ DataTable API error:', err);
+  }
+  console.groupEnd();
+
+  // 9. Environment
+  console.group('%c🌍 9. ENVIRONMENT', 'color: #f97316; font-weight: bold;');
   console.table({
     'Window location': window.location.href,
     'Parent origin': document.referrer || 'N/A',
@@ -310,7 +345,7 @@ function App() {
     return () => clearInterval(interval);
   }, [api, loading]);
 
-  // Handle selection changes from viewer
+  // Handle selection changes from viewer - using DataTable API
   const handleSelectionChange = useCallback(async (selection: string[]) => {
     if (!api || !projectId || !projectName) {
       console.log('⏭️ Skipping selection change - not ready');
@@ -327,125 +362,127 @@ function App() {
     console.log('📍 Selection IDs:', selection);
 
     try {
-      // Get properties for selected objects - kasutab Trimble Connect API-t
-      const viewer = api.viewer;
-      const objectsData = await viewer.getObjects({ selected: true });
+      // Extract properties using DataTable API
+      const properties: Array<{ objectId: string; properties: Record<string, any> }> = [];
+      const dataTableApi = (api as any).dataTable;
 
-      // DEBUG: Log raw API response
-      console.group('🔬 DEBUG: Trimble API Raw Response');
-      console.log('viewer.getObjects({ selected: true }):', JSON.stringify(objectsData, null, 2));
-      console.groupEnd();
+      console.group('📊 DataTable API Approach');
 
-      if (!objectsData || objectsData.length === 0) {
-        console.warn('No object data found');
-        return;
+      // Method 1: DataTable API (PREFERRED)
+      if (dataTableApi && typeof dataTableApi.getSelectedRowsData === 'function') {
+        console.log('✅ DataTable API available, trying getSelectedRowsData...');
+
+        try {
+          const selectedRowsData = await dataTableApi.getSelectedRowsData();
+          console.log('DataTable selectedRowsData:', JSON.stringify(selectedRowsData, null, 2));
+
+          if (selectedRowsData && Array.isArray(selectedRowsData) && selectedRowsData.length > 0) {
+            console.log(`✅ Got ${selectedRowsData.length} rows from DataTable API`);
+
+            for (const row of selectedRowsData) {
+              // DataTable returns all properties directly
+              const guid = row.GUID || row.guid || row.GlobalId || row.globalId || row.id;
+              const objectId = guid || String(row.id || row._id || Math.random());
+
+              console.log(`📦 Processing row with GUID: ${objectId}`);
+              console.log('Row data:', JSON.stringify(row, null, 2));
+
+              properties.push({
+                objectId: objectId,
+                properties: {
+                  GUID: guid,
+                  Mark: row.Mark || row.mark || row.MARK || '',
+                  Name: row.Name || row.name || row.NAME || '',
+                  Weight: row.Weight || row.weight || row.WEIGHT || row.NetWeight || 0,
+                  Assembly: row.Assembly || row.assembly || row.ASSEMBLY || '',
+                  Phase: row.Phase || row.phase || row.PHASE || '',
+                  Material: row.Material || row.material || '',
+                  Profile: row.Profile || row.profile || '',
+                  Length: row.Length || row.length || 0,
+                  // Include all other properties
+                  ...row
+                }
+              });
+            }
+          } else {
+            console.warn('⚠️ DataTable returned empty or invalid data');
+          }
+        } catch (dtErr) {
+          console.warn('⚠️ DataTable API error:', dtErr);
+        }
+      } else {
+        console.log('⚠️ DataTable API not available');
       }
 
-      // Extract properties from each model
-      const properties: Array<{ objectId: string; properties: Record<string, any> }> = [];
+      // Method 2: Fallback to viewer API if DataTable didn't work
+      if (properties.length === 0) {
+        console.log('📦 Falling back to viewer.getObjects...');
 
-      for (const modelData of objectsData) {
-        const modelId = modelData.modelId;
-        const objects = modelData.objects || [];
+        const viewer = api.viewer;
+        const objectsData = await viewer.getObjects({ selected: true });
+        console.log('viewer.getObjects result:', JSON.stringify(objectsData, null, 2));
 
-        console.group(`🏗️ DEBUG: Model ${modelId}`);
-        console.log('Model data:', JSON.stringify(modelData, null, 2));
-        console.log('Objects count:', objects.length);
+        if (objectsData && objectsData.length > 0) {
+          for (const modelData of objectsData) {
+            const currentModelId = modelData.modelId;
+            const objects = modelData.objects || [];
 
-        for (const obj of objects) {
-          // API returns { id: number } - use id as runtime id
-          const runtimeId = obj.id || obj.objectRuntimeId;
-          const objectId = obj.objectId || String(runtimeId);
+            for (const obj of objects) {
+              const runtimeId = obj.id || obj.objectRuntimeId;
+              const objectId = obj.objectId || String(runtimeId);
 
-          console.group(`📦 Object: ${objectId} (runtimeId: ${runtimeId})`);
-          console.log('Object data:', JSON.stringify(obj, null, 2));
-
-          // Try multiple methods to get properties
-          let props: any[] = [];
-
-          // Method 1: getObjectProperties with runtime id
-          try {
-            console.log('🔍 Trying getObjectProperties([' + runtimeId + '])...');
-            props = await viewer.getObjectProperties([runtimeId]);
-            console.log('Method 1 result:', JSON.stringify(props, null, 2));
-          } catch (e) {
-            console.warn('Method 1 failed:', e);
-          }
-
-          // Method 2: getObjectPropertySets if Method 1 failed
-          if (!props || props.length === 0) {
-            try {
-              console.log('🔍 Trying getObjectPropertySets([' + runtimeId + '])...');
-              const propSets = await (viewer as any).getObjectPropertySets([runtimeId]);
-              console.log('Method 2 result:', JSON.stringify(propSets, null, 2));
-              if (propSets && propSets.length > 0) {
-                // Flatten property sets into single object
-                const flatProps: Record<string, any> = {};
-                for (const pset of propSets) {
-                  if (pset.properties) {
-                    for (const prop of pset.properties) {
-                      flatProps[prop.name] = prop.value;
-                    }
-                  }
+              // Try getObjectProperties as last resort
+              let objProps: Record<string, any> = {};
+              try {
+                const props = await viewer.getObjectProperties([runtimeId]);
+                if (props && props.length > 0) {
+                  objProps = props[0] || {};
                 }
-                props = [flatProps];
+              } catch (e) {
+                console.warn('getObjectProperties failed:', e);
               }
-            } catch (e) {
-              console.warn('Method 2 failed:', e);
+
+              properties.push({
+                objectId: objectId,
+                properties: {
+                  _runtimeId: runtimeId,
+                  _modelId: currentModelId,
+                  ...objProps
+                }
+              });
             }
-          }
-
-          // Method 3: Try with model context
-          if (!props || props.length === 0) {
-            try {
-              console.log('🔍 Trying getObjectProperties with model context...');
-              props = await viewer.getObjectProperties([{ modelId, objectRuntimeId: runtimeId }]);
-              console.log('Method 3 result:', JSON.stringify(props, null, 2));
-            } catch (e) {
-              console.warn('Method 3 failed:', e);
-            }
-          }
-
-          console.log('Final properties:', JSON.stringify(props, null, 2));
-          console.groupEnd();
-
-          if (props && props.length > 0) {
-            properties.push({
-              objectId: objectId,
-              properties: props[0] || {}
-            });
-          } else {
-            // Still add the object with empty properties so we can track it
-            properties.push({
-              objectId: objectId,
-              properties: { _runtimeId: runtimeId, _modelId: modelId }
-            });
           }
         }
-        console.groupEnd();
       }
+
+      console.groupEnd();
 
       console.log('📋 Properties loaded:', properties.length);
       console.log('📋 All properties:', JSON.stringify(properties, null, 2));
-      
+
+      if (properties.length === 0) {
+        console.warn('⚠️ No properties could be loaded');
+        return;
+      }
+
       // Sync to Supabase with project name and model name
       await AssemblyAPI.syncParts(
-        projectId, 
+        projectId,
         projectName,
         modelId || 'default-model',
         modelName || 'Unknown Model',
         properties
       );
-      
+
       // Load from Supabase with all related data
       const loadedParts = await AssemblyAPI.getParts(
-        projectId, 
+        projectId,
         modelId || 'default-model',
-        selection
+        properties.map(p => p.objectId)
       );
-      
+
       console.log('✅ Loaded parts from database:', loadedParts.length);
-      
+
       // Map to local format
       setParts(loadedParts.map(p => ({
         id: p.object_id,
