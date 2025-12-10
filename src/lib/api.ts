@@ -92,10 +92,13 @@ export class AssemblyAPI {
       teklaData: partsToUpsert[0]?.tekla_data
     });
 
-    // Insert new records - Supabase will auto-handle based on primary key
+    // Upsert with composite unique constraint (guid, project_id)
     const { data, error } = await supabase
       .from('assembly_parts')
-      .upsert(partsToUpsert)
+      .upsert(partsToUpsert, {
+        onConflict: 'guid,project_id',
+        ignoreDuplicates: false
+      })
       .select();
 
     console.log('📦 Upsert result:', { data: data?.length || 0, error: error?.message });
